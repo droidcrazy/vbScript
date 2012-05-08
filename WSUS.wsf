@@ -1,0 +1,757 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<package>
+	<comment>
+Project created: 19.06.2008 12:21
+BrineSoft Script Editor ver.2.1.12.0 (http://www.brinesoft.com)
+Author: Tommy Becker
+
+	</comment>
+	<job id="default">
+		<runtime>
+			<description>
+WSUS Admin Script
+----------------------------------------------
+This script needs to be run at a command line with cscript.
+----------------------------------------------
+			</description>
+			<named helpstring="Display this help screen." name="?" required="false" type="simple"/>
+			<named helpstring="Job to run." name="/job" required="false" type="string"/>
+			<example>----------------------------------------------
+Examples:
+
+cscript //nologo wsus.wsf //job:checkMissingUpdates /l:&lt;log file location&gt;
+cscript //nologo wsus.wsf //job:installMissingUpdates [/reboot:&lt;true|false&gt;]
+
+Remote (using psexec from pstools):
+psexec \\&lt;&lt;servername&gt;&gt; -u &lt;&lt;domain\username&gt;&gt; -p &lt;&lt;password&gt;&gt; cscript //nologo &lt;&lt;\\server\share\&gt;&gt;wsus.wsf //job:checkMissingUpdates /l:&lt;log file location&gt;
+-or-
+psexec @&lt;&lt;txt file with list of servers&gt;&gt; -u &lt;&lt;domain\username&gt;&gt; -p &lt;&lt;password&gt;&gt; cscript //nologo &lt;&lt;\\server\share\&gt;&gt;wsus.wsf //job:checkMissingUpdates /l:&lt;log file location&gt;
+
+</example>
+		</runtime>
+		<object id="ShellObj" progid="WScript.Shell"/>
+		<script language="VBScript">
+<![CDATA[
+Rem Script created: 19.06.2008 13:16
+Rem Author: sa_tbecker
+Call main
+WScript.Quit
+
+Sub main()
+Dim valid, strJob
+valid = False
+Do While Not valid
+valid = True
+strJob = InputBox("Please select a job to run:" & vbCrLf & "check = checkMissingUpdates" & vbCrLf & "install = installMissingUpdates" & vbCrLf & "list = listInstalledUpdates","WSUS Admin Script","Enter Here")
+
+Select Case LCase(CStr(strJob))
+ Case ""
+    WScript.quit
+ Case "check"
+    checkmissing
+    WScript.quit
+ Case "install"
+    installmissing
+    WScript.quit
+ Case "list"
+    listinstalled
+    WScript.quit
+ Case Else
+If MsgBox("You need to type a valid job.",53,"WSUS Admin Script Error:") = 4 Then valid = False Else WScript.quit
+End Select
+Loop
+End Sub
+
+Sub checkmissing()
+remote = MsgBox("Do you want to run the script on the local system?" & vbCrLf & "Yes = Local system" & vbCrLf & "No = Remote system or systems" & vbCrLf & "Cancel = Quit",35,"Check Missing Updates Script")
+Select Case remote
+ Case 2
+    WScript.quit
+ Case 6
+    logFileLoc = InputBox("Where would you like to store the log files?" & vbCrLf & "(You need to make sure the location exists.)","Log File Location","\\pxhouscorp02\networking\scripts\log")
+    If logFileLoc = "" Then WScript.quit
+    shellobj.Run "cmd /K cscript //nologo \\pxhouscorp02\networking\scripts\wsus.wsf //job:checkMissingUpdates /l:" & logfileloc,4,False
+    WScript.quit
+ Case 7
+    multi = MsgBox("Do you want to run it on multiple machines?" & vbCrLf & "Yes = Multiple Systems" & vbCrLf & "No = Single remote system" & vbCrLf & "Cancel = Quit",35,"Multiple Remote Machines?")
+        Select Case multi
+         Case 2
+            WScript.quit
+         Case 6
+            Set WshShell = WScript.createobject("wscript.shell")
+            answer = MsgBox("Click OK to choose an input file", 64, "Select list of servers:")
+            If answer = 1 Then
+            Set ObjFSO = CreateObject("UserAccounts.CommonDialog")
+                ObjFSO.Filter = "Text Documents|*.txt"
+                ObjFSO.FilterIndex = 3
+                ObjFSO.InitialDir = wshshell.currentdirectory
+                InitFSO = ObjFSO.ShowOpen
+            If InitFSO = False Then
+                WScript.Echo "Script Error: Please select a file!"
+                WScript.Quit
+            Else
+                inputfile = ObjFSO.FileName
+            End If
+            End If
+            logFileLoc = InputBox("Where would you like to store the log files?" & vbCrLf & "(You need to make sure the location exists.)","Log File Location","\\pxhouscorp02\networking\scripts\log")
+            If logFileLoc = "" Then WScript.quit
+            username = InputBox("Please enter a username" & vbCrLf & vbCrLf & "[domain\username]","Enter username:")
+            If username = "" Then WScript.quit
+            password = InputBox("Please enter a password","Enter password:")
+            If password = "" Then WScript.quit
+            shellobj.Run "cmd /K psexec @" & inputfile & " -u " & username & " -p " & password & " cscript //nologo \\pxhouscorp02\networking\scripts\wsus.wsf //job:checkMissingUpdates /l:" & logfileloc,4,False
+            WScript.quit
+         Case 7
+            server = InputBox("What system would you like to run the script on?","Single system selection:")
+            If server = "" Then WScript.quit
+            logFileLoc = InputBox("Where would you like to store the log files?" & vbCrLf & "(You need to make sure the location exists.)","Log File Location","\\pxhouscorp02\networking\scripts\log")
+            If logFileLoc = "" Then WScript.quit
+            username = InputBox("Please enter a username." & vbCrLf & vbCrLf & "[domain\username]","Enter username:")
+            If username = "" Then WScript.quit
+            password = InputBox("Please enter the password for """ & username & """.","Enter password:")
+            If password = "" Then WScript.quit
+            shellobj.Run "cmd /K psexec \\" & server & " -u " & username & " -p " & password & " cscript //nologo \\pxhouscorp02\networking\scripts\wsus.wsf //job:checkMissingUpdates /l:" & logfileloc,4,False
+            WScript.quit
+        End Select
+End Select
+End Sub
+
+Sub installmissing()
+remote = MsgBox("Do you want to run the script on the local system?" & vbCrLf & "Yes = Local system" & vbCrLf & "No = Remote system or systems" & vbCrLf & "Cancel = Quit",35,"Check Missing Updates Script")
+Select Case remote
+ Case 2
+    WScript.quit
+ Case 6
+    shellobj.Run "cmd /K cscript //nologo \\pxhouscorp02\networking\scripts\wsus.wsf //job:installMissingUpdates",4,False
+    WScript.quit
+ Case 7
+    multi = MsgBox("Do you want to run it on multiple machines?" & vbCrLf & "Yes = Multiple Systems" & vbCrLf & "No = Single remote system" & vbCrLf & "Cancel = Quit",35,"Multiple Remote Machines?")
+        Select Case multi
+         Case 2
+            WScript.quit
+         Case 6
+            Set WshShell = WScript.createobject("wscript.shell")
+            answer = MsgBox("Click OK to choose an input file", 64, "Select list of servers:")
+            If answer = 1 Then
+            Set ObjFSO = CreateObject("UserAccounts.CommonDialog")
+                ObjFSO.Filter = "Text Documents|*.txt"
+                ObjFSO.FilterIndex = 3
+                ObjFSO.InitialDir = wshshell.currentdirectory
+                InitFSO = ObjFSO.ShowOpen
+            If InitFSO = False Then
+                WScript.Echo "Script Error: Please select a file!"
+                WScript.Quit
+            Else
+                inputfile = ObjFSO.FileName
+            End If
+            End If
+            username = InputBox("Please enter a username." & vbCrLf & vbCrLf & "[domain\username]","Enter username:")
+            If username = "" Then WScript.quit
+            password = InputBox("Please enter the password for """ & username & """.","Enter password:")
+            If password = "" Then WScript.quit
+                Set fso = CreateObject("Scripting.FileSystemObject") 
+                     Set txtStreamIn = fso.OpenTextFile(InputFile) 
+                     Do While Not (txtStreamIn.AtEndOfStream) 
+                       server = txtStreamIn.ReadLine 
+                        shellobj.Run "cmd /c title " & server & " watchdog window&cscript //nologo \\pxhouscorp02\networking\scripts\WSUS.wsf //job:remoteinstaller /server:" & server & " /username:" & username & " /password:" & password,4,False
+                     Loop
+            WScript.quit
+         Case 7
+            server = InputBox("What system would you like to run the script on?","Single system selection:")
+            If server = "" Then WScript.quit
+            username = InputBox("Please enter a username." & vbCrLf & vbCrLf & "[domain\username]","Enter username:")
+            If username = "" Then WScript.quit
+            password = InputBox("Please enter the password for """ & username & """.","Enter password:")
+            If password = "" Then WScript.quit
+            shellobj.Run "cmd /c title " & server & "&cscript //nologo \\pxhouscorp02\networking\scripts\WSUS.wsf //job:remoteinstaller /server:" & server & " /username:" & username & " /password:" & password,4,False
+            WScript.quit
+        End Select
+End Select
+End Sub
+
+Sub listinstalled()
+ MsgBox "Not implemented yet.",16,"Oops..."
+End Sub
+]]>
+		</script>
+	</job>
+	<job id="checkMissingUpdates">
+		<resource id="Version"><![CDATA[1.08]]></resource>
+		<resource id="Author"><![CDATA[Name:Tommy Becker
+Email:tommy.becker@personix.fiserv.com
+]]></resource>
+		<runtime>
+			<description>
+			</description>
+			<named helpstring="Display this help screen." name="?" required="false" type="simple"/>
+			<named helpstring="Location of the output log files." name="l" required="true" type="string"/>
+			<named helpstring="Version info." name="ver" required="false" type="string"/>
+			<named helpstring="Author info." name="author" required="false" type="string"/>
+			<example>
+</example>
+		</runtime>
+		<script language="VBScript">
+<![CDATA[
+'Generated by the Project Wizard:
+
+'Check whether the script is processed by CScript.exe:
+If Right(UCase(WScript.FullName), Len("CScript.exe")) <> UCase("CScript.exe") Then
+    temp = MsgBox("Script can be processed with CScript.exe only.", 48, "WSUS Admin Script")
+    WScript.Quit
+End If
+
+'Check whether /ver parameter used:
+If WScript.Arguments.Named.Exists("ver") Or WScript.Arguments.Named.Exists("version") Then
+    WScript.Echo "Version: " & vbNewLine & getResource("Version")
+    WScript.Quit
+End If
+
+'Check whether /author parameter used:
+If WScript.Arguments.Named.Exists("author") Then
+    WScript.Echo "Author: " & vbNewLine & getResource("Author")
+    WScript.Quit
+End If
+
+'Check number of parameters:
+If WScript.Arguments.Named.Count = 0 And WScript.Arguments.Unnamed.Count = 0 Then
+    WScript.Arguments.ShowUsage
+    WScript.Quit
+End If
+
+'Check whether log parameter specified:
+If Not WScript.Arguments.Named.Exists("l") Then
+    WScript.Echo "Parameter /l expected on the command line."
+    WScript.Quit
+End If
+
+]]>
+		</script>
+		<object id="ws" progid="Scripting.FileSystemObject"/>
+		<object id="WshShell" progid="WScript.Shell"/>
+		<object id="autoUpdateClient" progid="Microsoft.Update.AutoUpdate"/>
+		<object id="updateSearcher" progid="Microsoft.Update.Searcher"/>
+		<object id="updateSession" progid="Microsoft.Update.Session"/>
+		<object id="objConnection" progid="ADODB.Connection"/>
+		<object id="objRecordSet" progid="ADODB.Recordset"/>
+		<object id="objADInfo" progid="ADSystemInfo"/>
+		<script language="VBScript">
+<![CDATA[
+'On Error Resume Next
+Const adOpenStatic = 3
+Const adLockOptimistic = 3
+Const ForWriting = 2
+Const ForReading = 1
+Const ForAppending = 8
+
+''Set objSINK = CreateObject("WbemScripting.SWbemSink","SINK_")
+Set searchResult = updateSearcher.Search("IsAssigned=1 and IsHidden=0 and IsInstalled=0 and Type='Software'")
+Set WshSysEnv = WshShell.Environment("PROCESS")
+
+'Script Configuration----------------------------------------------------
+'------------------------------------------------------------------------
+version = getResource("Version")
+loglocation = WScript.arguments.named("l")
+scriptroot = "\\pxhouscorp02\NETWORKING\Scripts"
+strDateStamp =Year(Now) & Right(100 + Month(Now), 2) & Right (100 + Day(Now), 2)
+logfile = loglocation & "\missingupdates" & strDateStamp & ".log"
+strComputer1 = objADInfo.ComputerName
+If strComputer = "" Then strComputer = wshShell.ExpandEnvironmentStrings("%Computername%")
+If InStr(UCase(WScript.FullName),"CSCRIPT.EXE") Then blnCScript = True Else blnCScript = False
+OODList = loglocation & "\outofdate" & strDateStamp & ".txt"
+OODCompList = loglocation & "\outofdatecomputers" & strDateStamp & ".csv"
+OODcheck = False
+ComputerOOD = False
+OODUpdates = 0
+
+
+'End Script Configuration------------------------------------------------
+'------------------------------------------------------------------------
+Set l = ws.OpenTextFile (logfile, ForAppending, True)
+Set OODfile = ws.OpenTextFile (OODList, ForAppending, True)
+Set OODcompfile = ws.OpenTextFile (OODCompList, ForAppending, True)
+If Err.Number <> 0 Then WriteLog(Err.Number & ": Description:" & Err.Description):WScript.Quit
+Err.Clear
+autoUpdateClient.detectnow()
+
+'Do While Not searchResult.isconpleted
+'WScript.Echo "waiting for search..."
+'WScript.Sleep 10000
+'Loop
+
+
+If searchResult.Updates.count = 0 Then
+WriteLog("Up to date.")
+Else
+WriteLog("Missing " & searchResult.Updates.count & " updates.")
+End If
+
+'Set updatesToDownload = CreateObject("Microsoft.Update.UpdateColl")
+
+objConnection.Open _
+    "Provider=SQLOLEDB;Data Source=houmwinetop01;" & _
+        "Trusted_Connection=Yes;Initial Catalog=SUSDB;"
+
+
+For I = 0 to searchResult.Updates.Count-1 
+    Set update = searchResult.Updates.Item(I) 
+    'strUpdates = strUpdates & update.Title
+    'objRecordSet.Open "SELECT UpdateId,CreationDate FROM PUBLIC_VIEWS.vUpdate where updateid='" & update.identity.updateid & "'", _
+    '    objConnection, adOpenStatic, adLockOptimistic
+    strSQL = "Declare @updateid varchar(100);Set @updateid = '" & update.identity.updateid & "';" & _
+        "SELECT UpdateId,CreationDate,InstallationRebootBehavior FROM PUBLIC_VIEWS.vUpdate Where updateid = @updateid"
+            objRecordSet.Open strSQL, objConnection, adOpenStatic, adLockOptimistic
+
+    releasedate = objRecordSet.Fields("CreationDate").Value
+    rebootbehavior = objRecordSet.Fields("InstallationRebootBehavior").Value
+    On Error Resume Next
+        For counter = 0 To update.categories.count -1
+        If category = "" Then
+        category = update.categories.item(counter).name
+        Else
+        category = category & "; " & update.categories.item(counter).name
+        End If
+        checkcat = update.categories.item(counter).name
+        If checkcat = "Security Updates" Or checkcat = "Critical Updates" Then categorymatch = True
+        Next
+    If checkOOD(releasedate) And categorymatch Then 
+    OODfile.WriteLine("[" & time & "] - " & strComputer & ",script version: " & version & "," & """Missing: " & update.Title & """, Release Date:" & releasedate & ", Reboot Behavior:" & rebootbehavior)
+    OODupdates = OODupdates +1
+    End If
+    If checkOOD(releasedate) And categorymatch Then ComputerOOD = True
+    WriteLog("""Missing: " & update.Title & """, Release Date:" & releasedate & ", Reboot Behavior:" & rebootbehavior)
+    If Not update.EulaAccepted Then update.AcceptEula
+
+    objRecordset.Close
+    category = ""
+    categorymatch = False
+Next
+If ComputerOOD Then OODfile.WriteLine("[" & time & "] - " & strComputer & ",script version: " & version & "," & "This computer has " & OODupdates & " updates out of date.")
+If ComputerOOD Then OODcompfile.WriteLine(strComputer & ",""" & OODupdates & " updates out of date.""") Else OODcompfile.WriteLine(strComputer & ","" Up to date.""")
+objConnection.Close
+Rem Set autoUpdateClient = Nothing
+Rem Set updateSession = Nothing
+Rem Set objConnection = Nothing
+Rem Set objRecordSet = Nothing
+Rem Set objADInfo = Nothing
+
+'Sub SINK_OnObjectReady()
+'WScript.Echo "finished"
+'End Sub
+
+
+Function WriteLog(strMsg) 
+l.writeline "[" & time & "] - " & strComputer & ",script version: " & version & "," & strMsg
+' Output to screen if cscript.exe 
+If blnCScript Then WScript.Echo "[" & time & "] " & strComputer & ",script version: " & version & "," & strMsg 
+End Function
+
+Function checkOOD(releasedate)
+    d = CDate(releasedate)
+    date0 = DateAdd("m",-2,Now)
+    If d < date0 Then
+    checkOOD = True
+    Else
+    checkOOD = False
+    End If
+End Function
+]]>
+		</script>
+	</job>
+	<job id="installMissingUpdates">
+		<comment>
+maybe needs automatic drive clean up?
+		</comment>
+		<resource id="Version"><![CDATA[1.05]]></resource>
+		<resource id="Author"><![CDATA[Name:Tommy Becker
+Email:tommy.becker@personix.fiserv.com
+]]></resource>
+		<runtime>
+			<description>
+			</description>
+			<named helpstring="Display this help screen." name="?" required="false" type="simple"/>
+			<named helpstring="True or False to reboot automatically" name="reboot" required="false" type="boolean"/>
+			<named helpstring="Version info." name="ver" required="false" type="string"/>
+			<named helpstring="Author info." name="author" required="false" type="string"/>
+			<example>
+</example>
+		</runtime>
+		<script language="VBScript">
+<![CDATA[
+'Generated by the Project Wizard:
+
+'Check whether the script is processed by CScript.exe:
+If Right(UCase(WScript.FullName), Len("CScript.exe")) <> UCase("CScript.exe") Then
+    temp = MsgBox("Script can be processed with CScript.exe only.", 48, "WSUS Admin Script")
+    WScript.Quit
+End If
+
+'Check whether /ver parameter used:
+If WScript.Arguments.Named.Exists("ver") Or WScript.Arguments.Named.Exists("version") Then
+    WScript.Echo "Version: " & vbNewLine & getResource("Version")
+    WScript.Quit
+End If
+
+'Check whether /author parameter used:
+If WScript.Arguments.Named.Exists("author") Then
+    WScript.Echo "Author: " & vbNewLine & getResource("Author")
+    WScript.Quit
+End If
+]]>
+		</script>
+		<object id="autoUpdateClient" progid="Microsoft.Update.AutoUpdate"/>
+		<object id="updateSession" progid="Microsoft.Update.Session"/>
+		<object id="updatesToDownload" progid="Microsoft.Update.UpdateColl"/>
+		<object id="updatesToInstall" progid="Microsoft.Update.UpdateColl"/>
+		<object id="wshShell" progid="WScript.Shell"/>
+		<script language="VBScript">
+<![CDATA[
+Rem Script created: 19.06.2008 13:57
+Rem Author: sa_tbecker
+
+On Error Resume Next
+strComputer = wshShell.ExpandEnvironmentStrings("%ComputerName%")
+Call printout("Running " & WScript.ScriptFullName & " on " & strComputer & ".")
+Rem Set autoUpdateClient = CreateObject("microsoft.Update.AutoUpdate")
+Rem Set updateSession = CreateObject("Microsoft.Update.Session")
+Set updateSearcher = updateSession.CreateupdateSearcher()
+Set searchResult = updateSearcher.Search("IsAssigned=1 and IsHidden=0 and IsInstalled=0 and Type='Software'")
+counter = 0
+Do While Err.Number <> 0
+counter = counter + 1
+Select Case hex(Err.Number)
+Case "8024400A"
+	Call printout("Error 8024400A occured while running Searcher. You might try running 'regsvr32 msxml3.dll'. Trying again in 10 seconds.")
+	Err.Clear
+Case "80072EE2"
+	Call printout("A timeout error occured while running Searcher. Trying again in 10 seconds.")
+	Err.Clear
+Case Else
+	Call printout("Error 0x" & hex(Err.Number) & ": Description:" & Err.Description & " Will wait 10 seconds and try again.")
+	err.clear
+End Select
+If counter > 3 Then call printout("Stopping script because of too many errors trying to run Searcher"):WScript.Quit(4)
+WScript.Sleep 10000
+Set searchResult = updateSearcher.Search("IsAssigned=1 and IsHidden=0 and IsInstalled=0 and Type='Software'")
+Loop
+
+autoUpdateClient.detectnow()
+'------------------------------------------------------------------------------------
+'report missing updates:
+Call printout("Missing " & searchResult.Updates.count & " updates:")
+
+If searchResult.Updates.Count = 0 Then Call printout("There are no further updates needed for your PC at this time."):WScript.Quit(0)
+
+Rem Set updatesToDownload = CreateObject("Microsoft.Update.UpdateColl")
+
+For I = 0 To searchResult.Updates.Count-1 
+    Set update = searchResult.Updates.Item(I) 
+    If Not update.IsDownloaded Then
+    Call printout("Update to be added to download list: " & update.Title)
+    updatesToDownload.Add(update)
+    Else
+    Call printout("Update already downloaded: " & update.title)
+    End If
+    If Not update.EulaAccepted Then update.AcceptEula 
+    tempspace = update.maxdownloadsize
+    strSpace = CDbl(strSpace) + CDbl(tempSpace)
+    tempspace = 0
+Next 
+SystemDrive = wshShell.ExpandEnvironmentStrings("%SystemDrive%")
+Call printout("System Drive is: " & SystemDrive)
+SystemDriveFree = Round(getDriveSizeFree(".", SystemDrive),2)
+SystemDriveTotal = Round(getDriveSizeTotal(".", SystemDrive),2)
+SystemDriveThreshold = SystemDriveTotal*.10
+Call printout("Space Required on " & systemdrive & "\ : " & Round(strSpace/1024/1024,2) & "MB")
+Call printout("Total Space on " & systemdrive & "\ : " & Round(SystemDriveTotal/1024/1024,2) & "MB")
+Call printout("Threshold of " & systemdrive & "\ : " & Round(systemdrivethreshold/1024/1024.2) & "MB")
+Call printout("Free Space on " & systemdrive & "\ : " & Round(SystemDriveFree/1024/1024,2) & "MB")
+
+If SystemDriveFree < SystemDriveThreshold Then Call printout("Drive Size above threshold. Will not Download Updates."):WScript.quit(3)
+If CDbl(strSpace) > SystemDriveFree - SystemDriveThreshold Then Call printout("There is not enough drive space to download and install updates. Stopping Script."):WScript.quit(3)
+
+'------------------------------------------------------------------------------------
+'download missing updates
+Set downloader = updateSession.CreateUpdateDownloader() 
+on error resume Next
+downloader.Updates = updatesToDownload
+Call printout("********** Downloading updates **********")
+
+downloader.Download()
+
+Rem Do While NOT DLjob.completed
+    Rem Call printout(dljob.getprogress.percentcomplete & "% complete.")
+    Rem WScript.Sleep 5000
+Rem Loop
+
+If err.number = -2145124316 Then Call printout("Looks like there's nothing to Download... Moving on to install."):err.clear
+If err.number <> 0 And Not err.number = -2145124316 Then Call printout("Error " & err.number & " has occured.  Error description: " & err.description):err.clear
+
+
+For I = 0 To searchResult.Updates.Count-1
+    Set update = searchResult.Updates.Item(I)
+    If update.IsDownloaded Then
+       Call printout("Ready to install: " & update.Title)
+    End If
+       On Error GoTo 0
+Next
+SystemDriveFree = Round(getDriveSizeFree(".", SystemDrive),2)
+Call printout("Total Space on " & systemdrive & "\ : " & Round(SystemDriveTotal/1024/1024,2) & "MB")
+Call printout("Threshold of " & systemdrive & "\ : " & Round(systemdrivethreshold/1024/1024.2) & "MB")
+Call printout("Free Space on " & systemdrive & "\ : " & Round(SystemDriveFree/1024/1024,2) & "MB")
+
+If SystemDriveFree < SystemDriveThreshold Then Call printout("Drive Size above threshold. Will not install Updates."):WScript.quit(3)
+
+'------------------------------------------------------------------------------------
+'install missing updates
+Rem Set updatesToInstall = CreateObject("Microsoft.Update.UpdateColl")
+Set installer = updateSession.CreateUpdateInstaller()
+Call printout("********** Adding updates to collection **********")
+For I = 0 To searchResult.Updates.Count-1
+    set update = searchResult.Updates.Item(I)
+    If update.IsDownloaded = true Then
+       updatesToInstall.Add(update)
+    End If
+       Call printout("Adding to collection: " & update.Title)
+Next
+
+installer.Updates = updatesToInstall
+Call printout("********** Installing updates **********")
+
+on error resume next    
+    Set installationResult = installer.Install()
+Call printout("Installation Result: " & installationResult.ResultCode)
+Call printout("Reboot Required: " & installationResult.RebootRequired)
+Call printout("Listing of updates installed and individual installation results:")
+For i = 0 to updatesToInstall.Count - 1
+        If installationResult.GetUpdateResult(i).ResultCode = 2 Then 
+            strResult = "Installed"
+        ElseIf installationResult.GetUpdateResult(i).ResultCode = 1 Then 
+            strResult = "In progress"
+        ElseIf installationResult.GetUpdateResult(i).ResultCode = 3 Then 
+            strResult = "Operation complete, but with errors"
+        ElseIf installationResult.GetUpdateResult(i).ResultCode = 4 Then 
+            strResult = "Operation failed"
+        ElseIf installationResult.GetUpdateResult(i).ResultCode = 5 Then 
+            strResult = "Operation aborted"            
+        End If
+        Call printout(updatesToInstall.Item(i).Title & ": " & strResult)
+    Next
+
+SystemDriveFree = Round(getDriveSizeFree(".", SystemDrive),2)
+Call printout("Total Space on " & systemdrive & "\ : " & Round(SystemDriveTotal/1024/1024,2) & "MB")
+Call printout("Threshold of " & systemdrive & "\ : " & Round(systemdrivethreshold/1024/1024.2) & "MB")
+Call printout("Free Space on " & systemdrive & "\ : " & Round(SystemDriveFree/1024/1024,2) & "MB")
+
+If SystemDriveFree < SystemDriveThreshold Then Call printout("!!!Drive Size above threshold. Please be aware!!!")
+
+
+
+'printout("********** Rebooting Computer **********")
+If installationResult.RebootRequired Then
+Call printout("********** Reboot Required **********")
+If WScript.arguments.named.exists("reboot") Then reboot = WScript.arguments.named("reboot") Else reboot = True
+If Not reboot Then Call printout("********** Reboot Stopped by Command Line **********"):WScript.quit(3)
+
+
+call printout("********** Rebooting Computer **********")
+strComputer = "."
+Set OpSysSet = GetObject("winmgmts:{(Shutdown)}//" & strComputer & "/root/cimv2").ExecQuery("select * from Win32_OperatingSystem"_
+    & " where Primary=true")
+
+Const EWX_LOGOFF = 0 
+Const EWX_SHUTDOWN = 1 
+Const EWX_REBOOT = 2 
+Const EWX_FORCE = 4 
+Const EWX_POWEROFF = 8 
+
+For Each OpSys in OpSysSet 
+    opSys.win32shutdown EWX_REBOOT + EWX_FORCE
+Next 
+Else
+Call printout("********** No Reboot Required **********"):WScript.quit(1)
+End If
+WScript.quit(2) 
+
+Function getDriveSizeTotal(strComputer, drvLetter)
+On Error Resume Next
+    Set objWMIService = GetObject("winmgmts://" & strComputer & "/root/cimv2")
+    strTemp = strComputer
+    If Err.Number Then
+        getDriveSizeTotal = "0"
+        Err.Clear
+    Else
+    On Error GoTo 0
+    Set colItems = objWMIService.ExecQuery("Select * from Win32_LogicalDisk where DriveType=3", , 48)
+    For Each objItem In colItems
+        If UCase(objItem.Name) = UCase(drvLetter) Then
+        getDriveSizeTotal = objItem.Size
+        End If
+    Next
+    End If
+End Function
+
+Function getDriveSizeFree(strComputer, drvLetter)
+On Error Resume Next
+    Set objWMIService = GetObject("winmgmts://" & strComputer & "/root/cimv2")
+    If Err.Number Then
+        getDriveSizeFree = "0"
+        Err.Clear
+    Else
+    On Error GoTo 0
+    Set colItems = objWMIService.ExecQuery("Select * from Win32_LogicalDisk where DriveType=3", , 48)
+    For Each objItem In colItems
+        If UCase(objItem.Name) = UCase(drvLetter) Then
+        getDriveSizeFree = objItem.FreeSpace
+        End If
+    Next
+    End If
+End Function
+
+Function printout(msg)
+    WScript.StdOut.WriteLine Now & " - " &  strComputer & " - " & msg
+End function
+]]>
+		</script>
+	</job>
+	<job id="logInstalledUpdates">
+		<comment>
+this needs alot of work
+		</comment>
+		<resource id="Version"><![CDATA[1.00]]></resource>
+		<resource id="Author"><![CDATA[Name:Tommy Becker
+Email:tommy.becker@personix.fiserv.com
+]]></resource>
+		<object id="objSession" progid="Microsoft.Update.Session"/>
+		<object id="WshNetwork" progid="WScript.Network"/>
+		<script language="VBScript">
+<![CDATA[
+Rem Script created: 19.06.2008 22:25
+Rem Author: sa_tbecker
+
+Rem Set objSession = CreateObject("Microsoft.Update.Session")
+Set objSearcher = objSession.CreateUpdateSearcher
+intHistoryCount = objSearcher.GetTotalHistoryCount
+Rem Set WshNetwork = CreateObject("wscript.network")
+strComputer = WshNetwork.ComputerName
+Set colHistory = objSearcher.QueryHistory(1, intHistoryCount)
+
+For Each objEntry in colHistory
+    Select Case objEntry.Operation
+    Case 1
+        Operation = "Installation"
+    Case 2
+        Operation = "Uninstallation"
+    Case Else
+        Operation = "Unknown"
+    End Select
+    
+    Select Case objEntry.ResultCode
+    Case 0
+        ResultCode = "Not Started"
+    Case 1
+        ResultCode = "In Progress"
+    Case 2
+        ResultCode = "Suceeded"
+    Case 3
+        ResultCode = "Suceeded with errors"
+    Case 4
+        ResultCode = "Failed"
+    Case 5
+        ResultCode = "Aborted"
+    Case Else
+        ResultCode = "Unknown"
+    End Select
+    
+    Select Case objEntry.ServerSelection
+    Case 0
+        ServerSelection = "Default"
+    Case 1
+        ServerSelection = "Managed Server"
+    Case 2
+        ServerSelection = "Windows Update"
+    Case 3
+        ServerSelection = "Others"
+    Case Else
+        ServerSelection = "Unknown"
+    End Select
+    WScript.Echo(strComputer & "," & objEntry.Date & "," & Operation & "," & ResultCode & ",""" & objEntry.Title & """," & ServerSelection)
+
+Next
+
+]]>
+		</script>
+	</job>
+	<job id="remoteInstaller">
+		<resource id="Version"><![CDATA[1.00]]></resource>
+		<resource id="Author"><![CDATA[Name:Tommy Becker
+Email:tommy.becker@personix.fiserv.com
+]]></resource>
+		<runtime>
+			<description>
+			</description>
+			<named helpstring="Display this help screen." name="?" required="false" type="simple"/>
+			<named helpstring="Server to run on." name="server" required="true" type="string"/>
+			<named helpstring="Used to control automatic reboot behavior." name="reboot" required="false" type="string"/>
+			<named helpstring="Required username to run as." name="username" required="true" type="string"/>
+			<named helpstring="Required password for username." name="password" required="true" type="string"/>
+			<example>
+</example>
+		</runtime>
+		<object id="ShellObj" progid="WScript.Shell"/>
+		<script language="VBScript">
+<![CDATA[
+Rem Script created: 20.06.2008 09:26
+Rem Author: sa_tbecker
+
+strComputer = WScript.arguments.named("server")
+reboot = WScript.arguments.named("reboot")
+username = WScript.arguments.named("username")
+password = WScript.arguments.named("password")
+
+continue = True
+Do While continue
+counter = 0
+WScript.echo "Kicking off the script in another CMD window. To run on " & strComputer & "."
+installerStatus = shellobj.Run("cmd /c title " & strComputer & " remote installer&psexec \\" & strComputer & " -u " & username & " -p " & password & " cscript \\pxhouscorp02\networking\Scripts\WSUS.wsf //job:installMissingUpdates",7,True)
+Select Case installerstatus
+ Case 0
+    WScript.echo "No more updates are needed on " & strcomputer & "."
+    continue = False
+ Case 1
+    WScript.echo "Install finished but " & strComputer & " did not require a reboot -- waiting 5 minutes and running script again."
+    WScript.sleep 300000
+    continue = True
+ Case 2
+    WScript.echo "Install finished but " & strComputer & " required a reboot. Will ping to see when it comes back up."
+    counter = 0
+    WScript.sleep 30000
+    Do While Not available
+        available = ping(strComputer)
+        If Not available Then WScript.echo("No response from " & strComputer & ".")
+        WScript.sleep 5000
+        If counter < 120 Then counter = counter + 1 Else MsgBox "Computer " & strComputer & " has been down for 10 minutes. Please check.",16,"Error on " & strComputer : WScript.quit
+    Loop
+    WScript.echo strComputer & " is available again... will wait 5 minutes for system to load up and run script again."
+    WScript.sleep 300000
+    continue = True
+ Case 3
+    MsgBox "There's not enough space on the system drive of " & strComputer & " to finish script. Please Check."
+    continue = False
+ Case Else
+    MsgBox "An error occured on " & strComputer & ". Please check."
+    continue = False
+End Select
+If counter < 5 Then counter = counter + 1 Else continue = False
+Loop
+WScript.quit
+
+Function ping(strComputer)
+Set objPing = GetObject("winmgmts:{impersonationLevel=impersonate}").ExecQuery("select * from Win32_PingStatus where address = '" & strComputer & "'")
+For Each objStatus in objPing
+    If IsNull(objStatus.StatusCode) Or objStatus.StatusCode <> 0 Then ping = False Else ping = True
+Next
+End Function
+]]>
+		</script>
+	</job>
+</package>

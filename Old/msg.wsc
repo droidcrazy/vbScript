@@ -1,0 +1,779 @@
+<?xml version="1.0"?>
+<component>
+
+<?component error="true" debug="true"?>
+
+<registration
+     description="Simple IE-based message window"
+     progid="msg.wsc"
+     version="1.02"
+     classid="{BC1BA000-EBA3-11D3-A82A-00E02948E7D6}"
+>
+</registration>
+
+<public>
+  <!-- Properties -->
+     <property get put name="top" />
+  <property get put name="left"         />
+     <property get put name="height" />
+     <property get put name="width" />
+     <property get put name="title" />
+     <property get put name="font" />
+     <property get put name="color" />
+     <property get put name="background" />
+     <property get put name="resizable" />
+     <property get put name="timestamp" />
+     <property get put name="autoscroll" />
+     <property get put name="buffer" />
+     <property get put name="encodeBuffer" />
+     <property get name="closed" />
+     <property get name="IEVersion" />
+     <property get name="OS" />
+     <property get name="win" />
+     <property get name="doc" />
+     <property get name="header" />
+     <property get name="footer" />
+     <property name="data" />
+ <!-- Methods -->
+     <method name="write"> <parameter name="sText"/>
+     </method>
+     <method name="writeBlock"><parameter name="sText"/>
+     </method>
+     <method name="writeHTML"> <parameter name="sHTML"/>
+     </method>
+     <method name="skip"> <parameter name="nLines"/>
+     </method>
+     <method name="HTMLEncodeText">
+                            <parameter name="sText"/>
+     </method>
+     <method name="flush">
+     </method>
+     <method name="clear">
+     </method>
+     <method name="clearBuffer">
+     </method>
+     <method name="show">
+     </method>
+  <method name="hide">
+     </method>
+     <method name="center">
+     </method>
+     <method name="resizeByPercent">
+                            <parameter name="nPercentWidth"/>
+                            <parameter name="nPercentHeight"/>
+     </method>
+     <method name="complete">
+     </method>
+     <method name="close">
+     </method>
+</public>
+
+<object id='ie' progid='InternetExplorer.Application'/>
+
+<script language="VBScript">
+<![CDATA[
+Option Explicit
+'== Global Variables ===
+  
+  private oWindow
+  private oDocument
+  private oMsg
+  private sTitle
+  private bResizable
+  private bTimestamp
+  private bAutoscroll
+  private bBuffer
+  private bEncodeBuffer
+  private bFlushing
+  private bBlockWriting
+  private oBuffer
+  private sTableHTML
+  public  data
+
+  '== Initialization ===
+  sTitle = "Messages"
+  bResizable = true
+  bTimestamp = false
+  bAutoscroll = true
+  bBuffer = false
+  bEncodeBuffer = true
+  set oBuffer = Nothing
+  bFlushing = false
+  bBlockWriting = false
+    
+  with ie
+    .menubar = 0
+    .toolbar = 0
+    .statusbar = 0
+    .addressbar = 0
+    .resizable = bResizable
+    .navigate "about:blank"
+    while .busy: wend
+    on error resume next
+      do 'occasionally IE still won't be ready...
+        err.clear
+        set oDocument = .document
+      loop while err
+    on error goto 0
+
+    oDocument.open
+    oDocument.write getresource("html")
+    oDocument.close
+    while .busy: wend
+    set oMsg = oDocument.all.tblMsg
+    sTableHTML = oMsg.outerHTML
+    set oWindow = .document.parentWindow
+    with oDocument.parentWindow.screen
+      ie.width = .width / 2
+      ie.height = .height / 2
+      ie.left = (.width - ie.width) /2
+      ie.top = (.height - ie.height) /2
+    end with
+  end with
+  put_title(sTitle)
+  oDocument.body.style.font = "normal normal 10pt 'verdana'"
+  oDocument.all.tblMsg.style.font = oDocument.body.style.font
+  oDocument.body.style.color = "black"
+  oDocument.all.tblMsg.style.color = oDocument.body.style.color
+  oDocument.body.style.background = "white"
+  sTableHTML = oMsg.outerHTML
+
+  ExecuteGlobal getresource("code")
+
+'== Property Procedures ===
+  
+function get_top()
+     get_top = ie.top
+end function
+
+function put_top(newValue)
+  if not isnumeric(newValue) then exit function
+  ie.top = newValue
+end function
+
+function get_left()
+     get_left = ie.left
+end function
+
+function put_left(newValue)
+  if not isnumeric(newValue) then exit function
+  ie.left = newValue
+end function
+
+function get_height()
+     get_height = ie.height
+end function
+
+function put_height(newValue)
+  if not isnumeric(newValue) then exit function
+  ie.height = newValue
+end function
+
+function get_width()
+     get_width = ie.width
+end function
+
+function put_width(newValue)
+  if not isnumeric(newValue) then exit function
+  ie.width = newValue
+end function
+
+function get_title()
+     get_title = sTitle
+end function
+
+function put_title(newValue)
+  sTitle = newValue
+     oDocument.title = sTitle & string(256,"_")
+end function
+
+function get_font()
+     get_font = oDocument.body.style.font
+end function
+
+function put_font(newValue)
+  on error resume next
+     oDocument.body.style.font = newValue
+     oDocument.all.tblMsg.style.font = oDocument.body.style.font
+end function
+
+function get_color()
+     get_color = oDocument.body.style.color
+end function
+
+function put_color(newValue)
+  on error resume next
+     oDocument.body.style.color = newValue
+     oDocument.all.tblMsg.style.color = oDocument.body.style.color
+end function
+
+function get_background()
+     get_background = oDocument.body.style.background
+end function
+
+function put_background(newValue)
+  on error resume next
+     oDocument.body.style.background = newValue
+end function
+
+function get_resizable()
+  if not isnumeric(newValue) then exit function
+     get_resizable = bResizable
+end function
+
+function put_resizable(newValue)
+  if not isnumeric(newValue) then exit function
+     bResizable = Cbool(abs(newValue))
+  ie.resizable = bResizable
+end function
+
+function get_timestamp()
+     get_timestamp = bTimestamp
+end function
+
+function put_timestamp(newValue)
+  if not isnumeric(newValue) then exit function
+     bTimestamp = Cbool(abs(newValue))
+end function
+
+function get_autoscroll()
+     get_autoscroll = bAutoscroll
+end function
+
+function put_autoscroll(newValue)
+  if not isnumeric(newValue) then exit function
+     bAutoscroll = Cbool(abs(newValue))
+end function
+
+function put_buffer(newValue)
+  if not isnumeric(newValue) then exit function
+     bBuffer = Cbool(abs(newValue))
+  if bBuffer = True then
+    set oBuffer = new CBuffer
+  else
+    set oBuffer = Nothing
+  end if
+end function
+
+function get_buffer()
+     get_buffer = bBuffer
+end function
+
+function put_encodeBuffer(newValue)
+  if not isnumeric(newValue) then exit function
+     bEncodeBuffer = Cbool(abs(newValue))
+end function
+
+function get_encodeBuffer()
+     get_encodeBuffer = bEncodeBuffer
+end function
+
+function get_win()
+     set get_win = oWindow
+end function
+
+function get_doc()
+     set get_doc = oDocument
+end function
+
+function get_header()
+     set get_header = oDocument.all.divHeader
+end function
+
+function get_footer()
+     set get_footer = oDocument.all.divFooter
+end function
+
+function get_closed()
+  get_closed = true
+  on error resume next
+     get_closed = (Typename(oDocument) = "Object")
+end function
+
+function get_IEVersion()
+  dim ua
+  ua = oWindow.navigator.useragent
+  get_IEVersion = split(trim(split(ua,";")(1))," ")(1)
+end function
+
+function get_OS()
+  dim ua
+  ua = oWindow.navigator.useragent
+  get_OS = replace(trim(split(ua,";")(2)),")","")
+end function
+
+'== Public Methods ==
+  
+function write(byval sText)
+  dim cell
+  set write = nothing
+  if bTimestamp then
+    sText = GetTimestamp(false) & sText
+  end if
+  if bBuffer then
+    if bEncodeBuffer then
+      oBuffer.queue SimpleEncode(sText)
+    else
+      oBuffer.queue sText
+    end if
+    exit function
+  end if
+  set cell = oMsg.insertRow.insertCell
+  cell.nowrap = true
+  cell.innerText = sText
+  if bAutoscroll then cell.scrollintoview
+  set write = cell
+end function
+
+function flush()
+  set flush = nothing
+  if bBuffer then
+    if oBuffer.count then
+      bFlushing = true
+      set flush = WriteBlock(oBuffer.contents)
+      bFlushing = false
+      oBuffer.clear
+    end if
+  end if
+end function
+
+function writeBlock(byval sText)
+  if bBuffer and not bFlushing then
+    if bEncodeBuffer then
+      sText = SimpleEncode(sText)
+    end if
+  end if
+  sText = "<pre style='margin-top:0;margin-bottom:0;" _
+        & "font:" _
+        & replace(oDocument.body.style.font,"'",chr(34)) _
+        & ";'>" _
+        & sText & "</pre>"
+  bBlockWriting = true
+  set writeBlock = writeHTML(sText)
+  bBlockWriting = false
+end function
+
+function writeHTML(byval sHtml)
+  dim cell
+  set writeHTML = nothing
+  if bTimestamp and not (bFlushing or bBlockWriting) then
+    sHtml = GetTimestamp(true) & sHtml
+  end if
+  if bBuffer and not bFlushing then
+    oBuffer.queue sHtml
+    exit function
+  end if
+  set cell = oMsg.insertRow.insertCell
+  cell.nowrap = false
+  cell.innerHTML = sHtml
+  if bAutoscroll then cell.scrollintoview
+  set writeHTML = cell
+end function
+
+function skip(nLines)
+  Dim n
+     for n = 1 to abs(cint(nLines))
+    set skip = writeHTML("&nbsp;")
+  next
+end function
+
+function clear()
+  oMsg.outerHTML = sTableHTML 
+  set oMsg = oDocument.all.tblMsg
+  oMsg.style.font = oDocument.body.style.font
+  oMsg.style.color = oDocument.body.style.color
+end function
+
+function clearBuffer
+  if bBuffer then
+    oBuffer.clear
+  end if
+end function
+
+function show
+     ie.visible = 1
+end function
+
+function hide
+     ie.visible = 0
+end function
+
+function center
+  with oDocument.parentWindow.screen
+    ie.left = (.availWidth - ie.width) /2
+    ie.top = (.availHeight - ie.height) /2
+  end with
+end function
+
+function resizeByPercent(byval nPercentWidth, byval nPercentHeight)
+  if not isnumeric(nPercentWidth) then exit function
+  if not isnumeric(nPercentHeight) then exit function
+  if nPercentWidth  > 100 then nPercentWidth  = 100
+  if nPercentHeight > 100 then nPercentHeight = 100
+  with oDocument.parentWindow.screen
+    ie.width = .availWidth   * (nPercentWidth/100)
+    ie.height = .availHeight * (nPercentHeight/100)
+  end with
+end function
+
+sub complete()
+  flush
+     oWindow.bComplete = true
+end sub
+
+function close
+  on error resume next
+    oWindow.bComplete = true
+    ie.quit
+  on error goto 0
+end function
+
+function HTMLEncodeText(sText)
+  Dim n
+  ReDim chars(len(sText)-1)
+  for n = 1 to len(sText)
+    chars(n-1) = HTMLEncodeChars(asc(mid(sText,n,1))) 
+  next
+  HTMLEncodeText = join(chars,"")
+end function
+
+'== Private Procedures ==
+'
+private function GetTimestamp(bHtml)
+  dim timestamp
+  timestamp = right(" " & formatdatetime(time(),vblongtime) & " ",12)
+  if bHtml then
+    GetTimestamp = replace(timestamp," ","&nbsp;")
+  else
+    GetTimestamp = timestamp
+  end if
+end function
+
+function SimpleEncode(sText)
+  SimpleEncode = replace(replace(sText,"&","&amp;"),"<","&lt;")
+end function
+
+'== Private Classes ==
+'
+class CBuffer
+  private ds
+  private i
+  private delim
+  sub class_initialize
+    me.clear
+    delim = vbcrlf
+  end sub
+  sub clear
+    ds = array()
+    i = -1
+  end sub
+  sub queue(str)
+    i = i+1
+    redim preserve ds(i)
+    ds(i) = str
+  end sub
+  property get contents()
+    contents = join(ds,delim)
+  end property
+  property get count()
+    count = ubound(ds)+1
+  end property
+  property get delimiter()
+    delimiter = delim
+  end property
+  property let delimiter(arg)
+    delim = arg
+  end property
+end class
+
+]]>
+</script>
+<!-- Resources -->
+<resource id="html">
+<![CDATA[
+<html>
+<head>
+<script language="vbscript">
+  dim bComplete 
+  bComplete = false
+  msg = _
+  "The calling script has not indicated that it has completed." & vbcrlf & _
+  "Closing this window may cause the calling script to fail."
+  sub confirm_close
+    if bComplete then exit sub
+    window.event.returnvalue = msg
+  end sub
+  set window.onbeforeunload = getref("confirm_close")
+</script>
+</head>
+<body>
+<div id=divHeader></div>
+<table id=tblMsg width=100% cellspacing=0 cellpadding=0>
+</table>
+<div id=divFooter></div>
+</body>
+</html>
+]]>
+</resource>
+<resource id="code">
+<![CDATA[
+Dim HTMLEncodeChars(255)
+HTMLEncodeChars(0) = chr(0)
+HTMLEncodeChars(1) = chr(1)
+HTMLEncodeChars(2) = chr(2)
+HTMLEncodeChars(3) = chr(3)
+HTMLEncodeChars(4) = chr(4)
+HTMLEncodeChars(5) = chr(5)
+HTMLEncodeChars(6) = chr(6)
+HTMLEncodeChars(7) = chr(7)
+HTMLEncodeChars(8) = chr(8)
+HTMLEncodeChars(9) = vbTab
+HTMLEncodeChars(10) = vbLf
+HTMLEncodeChars(11) = chr(11)
+HTMLEncodeChars(12) = chr(12)
+HTMLEncodeChars(13) = vbCr 
+HTMLEncodeChars(14) = chr(14)
+HTMLEncodeChars(15) = chr(15)
+HTMLEncodeChars(16) = chr(16)
+HTMLEncodeChars(17) = chr(17)
+HTMLEncodeChars(18) = chr(18)
+HTMLEncodeChars(19) = chr(19)
+HTMLEncodeChars(20) = chr(20)
+HTMLEncodeChars(21) = chr(21)
+HTMLEncodeChars(22) = chr(22)
+HTMLEncodeChars(23) = chr(23)
+HTMLEncodeChars(24) = chr(24)
+HTMLEncodeChars(25) = chr(25)
+HTMLEncodeChars(26) = chr(26)
+HTMLEncodeChars(27) = chr(27)
+HTMLEncodeChars(28) = chr(28)
+HTMLEncodeChars(29) = chr(29)
+HTMLEncodeChars(30) = chr(30)
+HTMLEncodeChars(31) = chr(31)
+HTMLEncodeChars(32) = " "
+HTMLEncodeChars(33) = "!"
+HTMLEncodeChars(34) = "&quot;"
+HTMLEncodeChars(35) = "#"
+HTMLEncodeChars(36) = "$"
+HTMLEncodeChars(37) = "%"
+HTMLEncodeChars(38) = "&amp;"
+HTMLEncodeChars(39) = "'"
+HTMLEncodeChars(40) = "("
+HTMLEncodeChars(41) = ")"
+HTMLEncodeChars(42) = "*"
+HTMLEncodeChars(43) = "+"
+HTMLEncodeChars(44) = ","
+HTMLEncodeChars(45) = "-"
+HTMLEncodeChars(46) = "."
+HTMLEncodeChars(47) = "/"
+HTMLEncodeChars(48) = "0"
+HTMLEncodeChars(49) = "1"
+HTMLEncodeChars(50) = "2"
+HTMLEncodeChars(51) = "3"
+HTMLEncodeChars(52) = "4"
+HTMLEncodeChars(53) = "5"
+HTMLEncodeChars(54) = "6"
+HTMLEncodeChars(55) = "7"
+HTMLEncodeChars(56) = "8"
+HTMLEncodeChars(57) = "9"
+HTMLEncodeChars(58) = ":"
+HTMLEncodeChars(59) = ";"
+HTMLEncodeChars(60) = "&lt;"
+HTMLEncodeChars(61) = "="
+HTMLEncodeChars(62) = "&gt;"
+HTMLEncodeChars(63) = chr(63)
+HTMLEncodeChars(64) = "@"
+HTMLEncodeChars(65) = "A"
+HTMLEncodeChars(66) = "B"
+HTMLEncodeChars(67) = "C"
+HTMLEncodeChars(68) = "D"
+HTMLEncodeChars(69) = "E"
+HTMLEncodeChars(70) = "F"
+HTMLEncodeChars(71) = "G"
+HTMLEncodeChars(72) = "H"
+HTMLEncodeChars(73) = "I"
+HTMLEncodeChars(74) = "J"
+HTMLEncodeChars(75) = "K"
+HTMLEncodeChars(76) = "L"
+HTMLEncodeChars(77) = "M"
+HTMLEncodeChars(78) = "N"
+HTMLEncodeChars(79) = "O"
+HTMLEncodeChars(80) = "P"
+HTMLEncodeChars(81) = "Q"
+HTMLEncodeChars(82) = "R"
+HTMLEncodeChars(83) = "S"
+HTMLEncodeChars(84) = "T"
+HTMLEncodeChars(85) = "U"
+HTMLEncodeChars(86) = "V"
+HTMLEncodeChars(87) = "W"
+HTMLEncodeChars(88) = "X"
+HTMLEncodeChars(89) = "Y"
+HTMLEncodeChars(90) = "Z"
+HTMLEncodeChars(91) = "["
+HTMLEncodeChars(92) = "\"
+HTMLEncodeChars(93) = "]"
+HTMLEncodeChars(94) = "^"
+HTMLEncodeChars(95) = "_"
+HTMLEncodeChars(96) = "`"
+HTMLEncodeChars(97) = "a"
+HTMLEncodeChars(98) = "b"
+HTMLEncodeChars(99) = "c"
+HTMLEncodeChars(100) = "d"
+HTMLEncodeChars(101) = "e"
+HTMLEncodeChars(102) = "f"
+HTMLEncodeChars(103) = "g"
+HTMLEncodeChars(104) = "h"
+HTMLEncodeChars(105) = "i"
+HTMLEncodeChars(106) = "j"
+HTMLEncodeChars(107) = "k"
+HTMLEncodeChars(108) = "l"
+HTMLEncodeChars(109) = "m"
+HTMLEncodeChars(110) = "n"
+HTMLEncodeChars(111) = "o"
+HTMLEncodeChars(112) = "p"
+HTMLEncodeChars(113) = "q"
+HTMLEncodeChars(114) = "r"
+HTMLEncodeChars(115) = "s"
+HTMLEncodeChars(116) = "t"
+HTMLEncodeChars(117) = "u"
+HTMLEncodeChars(118) = "v"
+HTMLEncodeChars(119) = "w"
+HTMLEncodeChars(120) = "x"
+HTMLEncodeChars(121) = "y"
+HTMLEncodeChars(122) = "z"
+HTMLEncodeChars(123) = "{"
+HTMLEncodeChars(124) = "|"
+HTMLEncodeChars(125) = "}"
+HTMLEncodeChars(126) = "~"
+HTMLEncodeChars(127) = "?"
+HTMLEncodeChars(128) = "&#8364;"
+HTMLEncodeChars(129) = chr(129)
+HTMLEncodeChars(130) = "&#8218;"
+HTMLEncodeChars(131) = "&#402;"
+HTMLEncodeChars(132) = "&#8222;"
+HTMLEncodeChars(133) = "&#8230;"
+HTMLEncodeChars(134) = "&#8224;"
+HTMLEncodeChars(135) = "&#8225;"
+HTMLEncodeChars(136) = "&#710;"
+HTMLEncodeChars(137) = "&#8240;"
+HTMLEncodeChars(138) = "&#352;"
+HTMLEncodeChars(139) = "&#8249;"
+HTMLEncodeChars(140) = "&#338;"
+HTMLEncodeChars(141) = chr(141)
+HTMLEncodeChars(142) = "&#381;"
+HTMLEncodeChars(143) = chr(143)
+HTMLEncodeChars(144) = chr(144)
+HTMLEncodeChars(145) = "&#8216;"
+HTMLEncodeChars(146) = "&#8217;"
+HTMLEncodeChars(147) = "&#8220;"
+HTMLEncodeChars(148) = "&#8221;"
+HTMLEncodeChars(149) = "&#8226;"
+HTMLEncodeChars(150) = "&#8211;"
+HTMLEncodeChars(151) = "&#8212;"
+HTMLEncodeChars(152) = "&#732;"
+HTMLEncodeChars(153) = "&#8482;"
+HTMLEncodeChars(154) = "&#353;"
+HTMLEncodeChars(155) = "&#8250;"
+HTMLEncodeChars(156) = "&#339;"
+HTMLEncodeChars(157) = chr(157)
+HTMLEncodeChars(158) = "&#382;"
+HTMLEncodeChars(159) = "&#376;"
+HTMLEncodeChars(160) = "&#160;"
+HTMLEncodeChars(161) = "&#161;"
+HTMLEncodeChars(162) = "&#162;"
+HTMLEncodeChars(163) = "&#163;"
+HTMLEncodeChars(164) = "&#164;"
+HTMLEncodeChars(165) = "&#165;"
+HTMLEncodeChars(166) = "&#166;"
+HTMLEncodeChars(167) = "&#167;"
+HTMLEncodeChars(168) = "&#168;"
+HTMLEncodeChars(169) = "&#169;"
+HTMLEncodeChars(170) = "&#170;"
+HTMLEncodeChars(171) = "&#171;"
+HTMLEncodeChars(172) = "&#172;"
+HTMLEncodeChars(173) = "&#173;"
+HTMLEncodeChars(174) = "&#174;"
+HTMLEncodeChars(175) = "&#175;"
+HTMLEncodeChars(176) = "&#176;"
+HTMLEncodeChars(177) = "&#177;"
+HTMLEncodeChars(178) = "&#178;"
+HTMLEncodeChars(179) = "&#179;"
+HTMLEncodeChars(180) = "&#180;"
+HTMLEncodeChars(181) = "&#181;"
+HTMLEncodeChars(182) = "&#182;"
+HTMLEncodeChars(183) = "&#183;"
+HTMLEncodeChars(184) = "&#184;"
+HTMLEncodeChars(185) = "&#185;"
+HTMLEncodeChars(186) = "&#186;"
+HTMLEncodeChars(187) = "&#187;"
+HTMLEncodeChars(188) = "&#188;"
+HTMLEncodeChars(189) = "&#189;"
+HTMLEncodeChars(190) = "&#190;"
+HTMLEncodeChars(191) = "&#191;"
+HTMLEncodeChars(192) = "&#192;"
+HTMLEncodeChars(193) = "&#193;"
+HTMLEncodeChars(194) = "&#194;"
+HTMLEncodeChars(195) = "&#195;"
+HTMLEncodeChars(196) = "&#196;"
+HTMLEncodeChars(197) = "&#197;"
+HTMLEncodeChars(198) = "&#198;"
+HTMLEncodeChars(199) = "&#199;"
+HTMLEncodeChars(200) = "&#200;"
+HTMLEncodeChars(201) = "&#201;"
+HTMLEncodeChars(202) = "&#202;"
+HTMLEncodeChars(203) = "&#203;"
+HTMLEncodeChars(204) = "&#204;"
+HTMLEncodeChars(205) = "&#205;"
+HTMLEncodeChars(206) = "&#206;"
+HTMLEncodeChars(207) = "&#207;"
+HTMLEncodeChars(208) = "&#208;"
+HTMLEncodeChars(209) = "&#209;"
+HTMLEncodeChars(210) = "&#210;"
+HTMLEncodeChars(211) = "&#211;"
+HTMLEncodeChars(212) = "&#212;"
+HTMLEncodeChars(213) = "&#213;"
+HTMLEncodeChars(214) = "&#214;"
+HTMLEncodeChars(215) = "&#215;"
+HTMLEncodeChars(216) = "&#216;"
+HTMLEncodeChars(217) = "&#217;"
+HTMLEncodeChars(218) = "&#218;"
+HTMLEncodeChars(219) = "&#219;"
+HTMLEncodeChars(220) = "&#220;"
+HTMLEncodeChars(221) = "&#221;"
+HTMLEncodeChars(222) = "&#222;"
+HTMLEncodeChars(223) = "&#223;"
+HTMLEncodeChars(224) = "&#224;"
+HTMLEncodeChars(225) = "&#225;"
+HTMLEncodeChars(226) = "&#226;"
+HTMLEncodeChars(227) = "&#227;"
+HTMLEncodeChars(228) = "&#228;"
+HTMLEncodeChars(229) = "&#229;"
+HTMLEncodeChars(230) = "&#230;"
+HTMLEncodeChars(231) = "&#231;"
+HTMLEncodeChars(232) = "&#232;"
+HTMLEncodeChars(233) = "&#233;"
+HTMLEncodeChars(234) = "&#234;"
+HTMLEncodeChars(235) = "&#235;"
+HTMLEncodeChars(236) = "&#236;"
+HTMLEncodeChars(237) = "&#237;"
+HTMLEncodeChars(238) = "&#238;"
+HTMLEncodeChars(239) = "&#239;"
+HTMLEncodeChars(240) = "&#240;"
+HTMLEncodeChars(241) = "&#241;"
+HTMLEncodeChars(242) = "&#242;"
+HTMLEncodeChars(243) = "&#243;"
+HTMLEncodeChars(244) = "&#244;"
+HTMLEncodeChars(245) = "&#245;"
+HTMLEncodeChars(246) = "&#246;"
+HTMLEncodeChars(247) = "&#247;"
+HTMLEncodeChars(248) = "&#248;"
+HTMLEncodeChars(249) = "&#249;"
+HTMLEncodeChars(250) = "&#250;"
+HTMLEncodeChars(251) = "&#251;"
+HTMLEncodeChars(252) = "&#252;"
+HTMLEncodeChars(253) = "&#253;"
+HTMLEncodeChars(254) = "&#254;"
+HTMLEncodeChars(255) = "&#255;"
+]]>
+</resource>
+</component>

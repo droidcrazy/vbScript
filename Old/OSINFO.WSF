@@ -1,0 +1,190 @@
+<?xml version="1.0" ?>
+<package>
+  <comment>
+OSINFO.WSF
+v3.0  July 2004
+Jeffery Hicks
+jhicks@jhditsolutions.com  http://www.jhditsolutions.com
+USAGE: cscript|wscript WMIOSINFO.VBS
+DESCRIPTION: Using WMI get operating system info for specified computer.
+Includes code to display uptime.
+NOTES: You must have admin rights on the queried system.  You will be
+prompted for alternate credentials. But they can't be used on the local
+system.
+  </comment>
+  <job>
+    <runtime>
+    <description>
+Using WMI get operating system info.
+You must have admin rights on the queried system.  You will be
+prompted for alternate credentials. But they can't be used on the local
+system.
+    </description>
+      <named helpstring="The name of the server to query" _
+      name="Server" required="true" type="string"/>
+      <named helpstring="The user for alternate credentials"
+      name="user" required="false" type="string"/>
+      <named helpstring="Alternate credentials pass." name="pass"_
+      required="false" type="string"/>
+      <named helpstring="Save results to a text file (True/False).
+      Default is FALSE." name="Log" required="false"_
+      type="boolean"/>
+<example>
+Examples:
+cscript wmiosinfo.wsf /server:FILE01
+cscript wmiosinfo.wsf /server:FILE01 /user:Admin /pass:P@ssw0rd
+cscript wmiosinfo.wsf /server:FILE01 /user:* /pass:*
+cscript wmiosinfo.wsf /server:FILE01 /user:Admin /pass:P@ssw0rd /log:TRUE
+cscript wmiosinfo.wsf /?
+
+If you use * for /server, /user or /pass, you will be prompted
+You cannot use alternate credentials for local systems.
+Existing log files with the same name will be overwritten.
+</example>
+    </runtime>
+    <object id="objFSO" progid="Scripting.FileSystemObject" _
+    reference="true"/>
+    <object id="objShell" progid="WScript.Shell"/>
+    <object id="objNetwork" progid="WScript.Network"/>
+    <object id="objLocator" progid="WbemScripting.SWbemLocator" _
+    reference="true"/>
+
+    <script language="VBScript">
+<![CDATA[
+ On Error Resume Next
+
+If WScript.Arguments.Count<1 Then
+  wscript.Arguments.ShowUsage
+  WScript.Quit
+End If
+strTitle="OS Info"
+'verify user is running Windows XP
+'If InStr(GetOS,"XP Professional")=False Then
+'  objShell.Popup "This script requires Windows XP Professional",10,_
+'  strTitle,vbOKOnly+vbExclamation
+'  WScript.Quit
+'End If
+
+strQuery="Select CSName,BootDevice,Caption,ServicePackMajorVersion," &_
+"FreePhysicalMemory,FreeVirtualMemory,InstallDate,LastBootUpTime," &_
+"Status,SystemDevice,TotalVirtualMemorySize,TotalVisibleMemorySize," &_
+"Version,WindowsDirectory FROM Win32_OperatingSystem"
+
+if WScript.Arguments.Named.exists("Server") then
+  strSrv=wscript.arguments.named("Server")
+else
+  wscript.echo "No Server Parameter specified!"
+  wscript.arguments.showusage
+  wscript.quit
+end if
+
+if WScript.Arguments.Named.exists("user") then strUser=WScript.Arguments.Named("user")
+if WScript.Arguments.Named.exists("pass") then strPass=WScript.Arguments.Named("pass")
+if WScript.Arguments.Named.exists("log") then blnLog=WScript.Arguments.Named("Log")
+
+If strSrv="*" Then
+  strSrv=InputBox("What computer do you want to query?",strTitle,_
+  objNetwork.ComputerName)
+  If strSrv="" Then WScript.Quit
+End If
+
+'skip getting alternate credentials if Server is local system
+If UCase(strSrv)<>UCase(objNetwork.Computername) Then
+  If strUSer="*" Then
+   strUSer=InputBox("Enter alternate credentials, or leave " &_
+   "blank to use the current credentials.",strTitle,"")
+  End If
+
+  If strPass="*" Then
+    strPass=GetIEpassword()
+  End If
+End If
+
+'if local system, then set any alternate credentials to blank
+If UCase(strSrv)=UCase(objNetwork.ComputerName) Then
+  strUSer=""
+  strPass=""
+End If
+
+'if computer is accessible then get information
+If TestPing(strSrv) Then
+
+Set objService = objLocator.ConnectServer (strSrv,"root\cimv2",_
+strUSer,strPass)
+ObjService.Security_.impersonationlevel = 3
+
+Set objRet=objService.ExecQuery(strQuery,"WQL",wbemForwardOnly+_
+wbemFlagReturnImmediately)
+If Err.Number<>0 Then
+  strErrMsg= "Error executing query on " & UCase(strSrv) & VbCrLf
+  strErrMsg= strErrMsg & "You might not have valid credentials." & VbCrLf
+  strErrMsg= strErrMsg & "Error #" & err.number & " [0x" &_
+  CStr(Hex(Err.Number)) &"]" & VbCrLf
+  If Err.Description <> "" Then
+    strErrMsg = strErrMsg & "Error description: " & Err.Description & "."
+  End If
+  objShell.Popup strErrMsg,10,strTitle,vbOKOnly+vbExclamation
+  wscript.quit
+End If
+
+For each item In objRet
+  strInfo=item.CSNAME & vbCrlf
+  strInfo=strInfo & item.Caption & " (" & item.Version & ")" & VbCrLf
+  strInfo=strInfo & "Service Pack " & item.ServicePackMajorVersion & VbCrLf
+  strInfo=strInfo & "Windows Directory: " & item.WindowsDirectory & vbCrlf
+  strInfo=strInfo & "Boot Device: " & item.BootDevice & vbCrlf
+  strInfo=strInfo & "System Device: " & item.SystemDevice & vbCrlf
+  strInfo=strInfo & "Physical Memory: " &_
+  FormatNumber(item.TotalVisibleMemorySize/1024,0) & "MB" & _
+  " Total/" & FormatNumber(item.FreePhysicalMemory/1024,0) & "MB Free" &_
+  " (" &_
+  FormatPercent(item.FreePhysicalMemory/item.TotalVisibleMemorySize,0) &_
+  ")" & VbCrLf
+
+  strInfo=strInfo & "Virtual Memory: " & _
+  FormatNumber(item.TotalVirtualMemorySize/1024,0) & "MB" & _
+  " Total/" & FormatNumber(item.FreeVirtualMemory/1024,0) & "MB Free" & _
+  " (" &FormatPercent(item.FreeVirtualMemory/item.TotalVirtualMemorySize,0)_
+  & ")" & VbCrLf
+
+
+  strInfo=strInfo & "Install Date: " & ConvWMITime(item.InstallDate) &_
+  VbCrLf
+  strInfo=strInfo & "Last Boot: " & ConvWMITime(item.LastBootUpTime) &_
+  VbCrLf
+  iDays=DateDiff("d",ConvWMITime(item.LastBootUpTime),Now)
+  iHours=DateDiff("h",ConvWMITime(item.LastBootUpTime),Now)
+  iMin=DateDiff("n",ConvWMITime(item.LastBootUpTime),Now)
+  iSec=DateDiff("s",ConvWMITime(item.LastBootUpTime),Now)
+  strUptime=iDays & " days " & (iHours Mod 24) & " hours " &_
+  (iMin Mod 60) & " minutes " & (iSec Mod 60) & " seconds"
+  strInfo=strInfo & "Uptime: " & strUptime & VbCrLf
+  strInfo=strInfo & "Status: " & item.Status
+
+Next
+
+objShell.Popup strInfo,30,strTitle,vbOKOnly+vbInformation
+
+If blnLog Then
+  Set objFile=objFSO.CreateTextFile(UCase(strSrv) & "_OSInfo.txt",True)
+  objFile.Write strInfo
+  objFile.WriteBlankLines(1)
+  objFile.WriteLine "recorded " & Now
+  objFile.Close
+  objShell.Popup "Results saved to " & strSrv &_
+   "_OSInfo.txt",10,strTitle,vbOKOnly+vbInformation
+End If
+
+Else
+strMsg="Failed to ping " & UCase(strSrv) & "."
+objShell.Popup strMsg,10,strTitle,vbOKOnly+vbExclamation
+
+End If
+
+Wscript.quit
+'End of main script
+
+]]>
+    </script>
+  </job>
+</package>

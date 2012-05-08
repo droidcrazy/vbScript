@@ -1,0 +1,136 @@
+<?xml version="1.0"?>
+<package>
+ <comment>
+ WMI Management Library
+ </comment>
+ <component id="WMILIB">
+  <?component error="true" debug="true" ?>
+  <registration progid="WMILIB.WSC"
+  classid="{61E6E0DC-4554-4D12-A9F4-D8E70DBCF318}"
+  description="WMI Library" remotable="no" version="1.00">
+  </registration>
+  <public>
+   <method name="Shutdown">
+    <parameter name="Host"/>
+   </method>
+   <method name="Reboot">
+    <parameter name="Host"/>
+   </method>
+   <method name="StartProcess">
+    <parameter name="Host"/>
+    <parameter name="CommandLine"/>
+    <parameter name="StartDirectory"/>
+   </method>
+   <method name="Processes">
+    <parameter name="Host"/>
+   </method>
+   <method name="EndProcess">
+    <parameter name="Host"/>
+    <parameter name="ProcessID"/>
+   </method>
+  </public>
+  <implements id="ASP" type="ASP"/>
+  <reference guid="{00000205-0000-0010-8000-00AA006D2EA4}"
+  version="2.0"/>
+  <object id="Recordset" progid="ADODB.Recordset"/>
+  <script id="Implementation" language="JScript">
+<![CDATA[
+var description = new WMILIB;
+
+function WMILIB()
+{
+ this.Processes = Processes;
+ this.StartProcess = StartProcess;
+ this.EndProcess = EndProcess;
+ this.Reboot = Reboot;
+ this.Shutdown = Shutdown;
+}
+
+function Shutdown(Host)
+{
+ try
+ {
+  var wql = "SELECT * FROM Win32_OperatingSystem WHERE Primary=True";
+  var os = GetObject("winmgmts://" + Host + "/root/cimv2").ExecQuery(wql);
+  for(var en = new Enumerator(os); !en.atEnd();
+  en.moveNext())
+   en.item().ShutDown();
+  return true;
+ }
+ catch(e)
+ {
+  return false;
+ }
+}
+
+function Reboot(Host)
+{
+ try
+ {
+  var wql = "SELECT * FROM Win32_OperatingSystem WHERE Primary=True";
+  var os = GetObject("winmgmts://" + Host + "/root/cimv2").ExecQuery(wql);
+  for (var en = new Enumerator(os); !en.atEnd();
+  en.moveNext())
+   en.item().Reboot();
+  return true;
+ }
+ catch(e)
+ {
+  return true;
+ }
+}
+
+function StartProcess(Host, CommandLine, StartDirectory)
+{
+ try
+ {
+  var ProcID;
+  var Proc = GetObject("WinMgmts://" + Host + "/root/cimv2").Get("Win32_Process");
+  Proc.Create(CommandLine, StartDirectory, ProcID);
+  return true;
+ }
+ catch(e)
+ {
+  return false;
+ }
+}
+
+function EndProcess(Host, ProcessID)
+{
+ try
+ {
+  var wql = "SELECT * FROM Win32_Process WHERE ProcessId=" + ProcessID;
+  var procs = GetObject("WinMgmts://" + Host + "/root/cimv2").ExecQuery(wql);
+  for(var en = new Enumerator(procs); !en.atEnd();
+  en.moveNext())
+   en.item().Terminate;
+  return true;
+ }
+ catch(e)
+ {
+  return false;
+ }
+}
+
+function Processes(Host)
+{
+ try
+ {
+  var wql = "SELECT * FROM Win32_Process";
+  var procs = GetObject("WinMgmts://" + Host + "/root/cimv2").ExecQuery(wql);
+  var values = new ActiveXObject("Scripting.Dictionary");
+  for(var en = new Enumerator(procs); !en.atEnd();
+  en.moveNext())
+   values.Add(en.item().ProcessId, en.item().Description);
+  return values;
+ }
+ catch(e)
+ {
+  return new Array(e.description);
+ }
+}
+]]>
+  </script>
+ </component>
+</package>
+

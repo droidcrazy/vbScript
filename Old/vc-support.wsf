@@ -1,0 +1,799 @@
+<job id="main">
+    <runtime>
+        <description>This script collects VMware VirtualCenter config and log data to help VMware
+customer support diagnose your problem.
+      </description>
+        <named name="?" helpstring="Displays this help" type="simple" required="false" />
+        <named name="d" helpstring="Absolute path of directory from which to gather the drm logs.
+    Default is %CommonAppData%\VMware\VMware VirtualCenter\Logs\drmdump." />
+        <named name="e" helpstring="Log event in the system eventlog (yes/no). Default is yes." type="string" required="false" />
+        <named name="f" helpstring="Generate full bundle containing extended data. Gathering extended data can take up to 10 additional minutes and is skipped by default." type="simple" required="false" />
+        <named name="n" helpstring="Maximum number of files to gather from each folder location. Default is 50." type="string" required="false" />
+        <named name="s" helpstring="Absolute path of directory under which the log data will be saved.
+    Default is the user's desktop. If specified, ensure the directory permissions secure the log data."
+    type="string" required="false" />
+        <named name="v" helpstring="Path of directory from which to gather vpxd logs. Default is %CommonAppData%\VMware\VMware VirtualCenter\Logs."
+            type="string" required="false"/>
+        <named name="z" helpstring="Zip up the support information. If a value is specified, use that as the
+    zip utility instead of the inbuilt default." type="string" required="false" />
+    </runtime>
+    <script language="VBScript">
+'
+' main()
+'
+Option Explicit
+
+' Magic namespace constants
+Const HKLM = &H80000002
+Const DESKTOP = &H10&
+Const APPDATA = &H1A&
+Const COMMON_APPDATA = &H23&
+Const WINDOWS = &H24&
+Const SYSTEM32 = &H25&
+Const PROGRAM_FILES = &H26&
+Private Const LOCAL_APPDATA = &H1C&
+
+Private Const ForAppending = 8
+
+'            Support script versioning
+' Major number tracks the 3-digit VC version at time of last change.
+' Minor number tracks script changes sub-VC-release
+'
+Private Const VCSupportVersion = "210.3"
+
+' use this only with cscript
+Dim scriptEngine
+scriptEngine = LCase(wscript.fullName)
+if 0 = InStr(scriptEngine, "cscript") then
+   WScript.Echo "You must run this script using the cscript engine. Try " _
+                & "running " & vbCrLf & vbCrLf & "       " & "cscript " _
+                & wscript.scriptName
+   wscript.quit 1
+end if
+
+Dim wshell, appshell, fso
+Dim workdir, instance, savedir, zipCmd, zipCmdFile, caclsCmd, tmpdir, _
+    systmpdir, CommonAppData, coredumpdir, numLogs, logdir, configdir, reg, installpath,_
+    prodName, logMsg, logEventFlag, zipFile, drmdumpdir, journaldir, _
+    VpxdLogSrc, VpxdSALogSrc, VpxdDumpSrc, VpxdSADumpSrc, _
+    VpxdDrmDumpSrc, VpxdSADrmDumpSrc, InvokedByVpxd, PerFolderFileCount, _
+    VpxClientLogDir, WebAccessLogDir, ExtendedData, ScriptFullName, _
+    ScriptName, LogFile, VersionFile, CompanyName
+
+set wshell = wscript.CreateObject("WScript.Shell")
+set fso = CreateObject("Scripting.FileSystemObject")
+set appshell = CreateObject("Shell.Application")
+set reg = GetObject("winmgmts:{impersonationLevel=impersonate}!\\" _
+                    & ".\root\default:StdRegProv")
+
+ScriptFullName = WScript.ScriptFullName
+ScriptName = WScript.ScriptName
+tmpdir = wshell.Environment("Process").Item("Temp")
+systmpdir = appshell.Namespace(WINDOWS).Self.Path & "\Temp\"
+CommonAppData=appshell.Namespace(COMMON_APPDATA).Self.Path & "\VMware"
+LogFile = Null
+
+'Path of client logs
+VpxClientLogDir = appshell.Namespace(LOCAL_APPDATA ).Self.Path & "\VMWare\vpx" 
+
+companyName="VMware, Inc."
+prodName="VMware VirtualCenter"
+installpath = wshell.RegRead("HKLM\SOFTWARE\" & companyName & "\" & prodName &_
+	      "\InstallPath")
+WebAccessLogDir = installpath & "tomcat\logs"
+
+' vpxd can be run as a service or standalone. It logs and dumps core in different
+' places depending on this. If invoked manually, we gather data from everywhere.
+
+' setup default values for various locations
+
+VpxdLogSrc=""
+VpxdSALogSrc=""
+VpxdDumpSrc=""
+VpxdSADumpSrc=""
+VpxdDrmDumpSrc=""
+VpxdSADrmDumpSrc=""
+
+savedir=appshell.Namespace(DESKTOP).Self.Path
+if not fso.FolderExists(savedir) then
+   savedir=tmpdir
+end if
+
+logEventFlag="yes"
+ExtendedData=False
+
+With WScript.Arguments.Named
+
+   if .exists("d") then
+      VpxdDrmDumpSrc=.item("d")
+   end if
+   if .exists("e") then
+      logEventFlag=.item("e")
+   end if
+   if .exists("f") then
+      ExtendedData = True
+   end if
+   if .exists("n") then
+      PerFolderFileCount = Int(.item("n"))
+   else
+      PerFolderFileCount = 50
+   end if
+   if .exists("s") then
+      savedir=.item("s")
+   end if
+   if .exists("v") then
+      VpxdLogSrc=.item("v")
+   end if
+   if .exists("x") and .item("x") = "vpxd" then
+      InvokedByVpxd=1
+      savedir=tmpdir
+   end if
+   if .exists("z") then
+      zipCmd=.item("z")
+      if Len(zipCmd) = 0 then
+         zipCmd=installpath & "zip.exe"
+      end if
+      if not fso.FileExists(zipCmd) then
+         wscript.stderr.WriteLine "Zip utility (" & zipCmd & ") doesn't exist."
+         wscript.quit 1
+      end if
+      zipCmd = fso.GetAbsolutePathName(zipCmd)
+   end if
+end with
+
+' If invoked by vpxd, we only gather logs for the invoking user, and gather
+' them in the user's temp folder instead of the desktop.
+
+' Get ready..
+if not fso.FolderExists(savedir) then
+   wscript.stderr.WriteLine "Staging directory (" & savedir & ") doesn't exist."
+   wscript.quit 1
+end if
+savedir = fso.GetAbsolutePathName(savedir)
+instance = "vcsupport-" & Month(Date) & "-" & Day(Date) & "-" _
+           & Year(Date) & "-" & Hour(Now) & "-" & Minute(Now)
+workdir = savedir & "\" & instance
+if fso.FolderExists(workdir) then
+   fso.DeleteFolder(workdir)
+end if
+wscript.stdout.WriteLine "Creating folder " & instance & " in " & savedir & ".."
+fso.CreateFolder(workdir)
+Log prodName & " Support v" & VCSupportVersion & ". Log started for " & instance & ".", True
+
+Set VersionFile = fso.CreateTextFile(workdir & "\vc-support-ver.txt", True)
+VersionFile.Write VcSupportVersion
+VersionFile.Close
+
+SetVpxdSrcDestValues(InvokedByVpxd)
+
+logdir=workdir & "\Logs\"
+configdir=workdir & "\Config\"
+drmdumpdir=workdir & "\DrmDumps\"
+coredumpdir=workdir & "\CoreDumps\"
+journaldir=workdir & "\Journals\"
+
+GatherLogs
+GatherEventLogs
+GatherConfig
+GatherDrmDumps
+GatherCoreDumps
+GatherJournals
+GatherAlpineSupportBundle ' temporary fix for PR 172514
+
+Log "All done at " & Now, False
+logMsg = "Support information for " & prodName & " was gathered under " _
+         & workdir & "."
+zipFile=""
+if Len(zipCmd) <> 0 then
+   zipFile = ZipIt(savedir, instance)
+   if Len(zipFile) <> 0 then
+      logMsg = logMsg & " Zipped as " & savedir & "\" & zipFile & "."
+      wscript.stdout.writeline "Zipped as: " & savedir & "\" & zipFile & "."
+   else
+      wscript.stderr.writeline "Error creating zip archive using " & zipCmd _
+                               & "."
+   end if
+else
+   Log "The support data has been gathered under " & workdir & ".", True
+end if
+
+if logEventFlag <> "no" then
+   on error resume next
+   wshell.LogEvent 4, logMsg
+   on error goto 0
+end if
+
+caclsCmd = appshell.Namespace(SYSTEM32).Self.Path & "\cacls.exe"
+wshell.Exec(caclsCmd & " /G Administrators:R " & workdir & " " & zipFile)
+
+'
+' main() ends.
+'
+
+Sub Log(msg, EchoToScreen)
+   If IsNull(LogFile) Then
+      wscript.stdout.writeline "Created " & workdir & "\vc-support.log"
+      Set LogFile = fso.CreateTextFile(workdir & "\vc-support.log", True)
+   End If
+   LogFile.WriteLine Now & ": " & msg
+   If EchoToScreen = True Then
+      wscript.stdout.WriteLine msg
+   End If
+End Sub
+
+Sub GatherJournals
+   Log "Gathering " & prodName & " transaction journals..", True
+   StageFiles CommonAppData & "\VMware\" & prodName & "\journal", "^.*\.[0-9]*$", journaldir
+End Sub
+
+Sub GatherLogs
+   Dim vpxd1LogDest, vpxd20xLogDest, VpxdLogDest, VpxdSALogDest, lmlog, vpxclientlogs, _
+       webaccesslogs, vmupgradelogs
+   Log "Gathering " & prodName & " logs..", True
+   If Not fso.FolderExists(logdir) Then
+      fso.CreateFolder(logdir)
+   End If
+
+   vpxd1LogDest = logdir & "\vpxd-1.x\"
+   vpxd20xLogDest = logdir & "\vpxd-2.0.x\"
+   vpxdLogDest = logdir & "\vpxd\"
+   vpxdSALogDest = logdir & "\vpxd-standalone\"
+   vpxclientlogs = logdir & "\vpxClient\"   'set destination directory for client logs.
+   webaccesslogs = logdir & "\webAccess\"
+   vmupgradelogs = logdir & "\vmupgrade\"
+
+   if Len(VpxdLogSrc) <> 0 then
+      Log "Collecting " & prodName & " service logs..", True
+      StageFiles VpxdLogSrc, "^vpxd-.*\.log$", vpxdLogDest
+   end if
+
+   if Len(VpxdSALogSrc) <> 0 then
+      Log "Collecting " & prodName & " standalone logs..", True
+      StageFiles VpxdSALogSrc, "^vpxd-.*\.log$", vpxdSALogDest
+   end if
+
+   StageFiles systmpdir & "\vpx\", "^vpxd-.*\.log$", vpxd20xLogDest
+   StageFiles systmpdir, "^vmware-vpxd-SYSTEM.*\.log$", vpxd1LogDest
+   'Collect VI client logs.
+   StageFiles VpxClientLogDir, "^viclient-.*\.log$", vpxclientlogs
+   StageFiles WebAccessLogDir, ".*\.log$", webaccesslogs
+   StageFiles tmpdir & "\vmupgrade\", "^vmupgrade-.*\.log$", vmupgradelogs
+   StageFiles CommonAppData & "\VMware Capacity Planner\Logs\", _
+              "^VMwareCP[0-9]*\.log$", logdir
+
+   on error resume next 'since they may not exist
+   fso.CopyFile tmpdir & "\vminst.log", logdir
+   fso.CopyFile tmpdir & "\vim-vcs-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-vic-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-um-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-umc-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-umga-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-ce-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-updcli-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-remcli-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-vmosql.log", logdir
+   fso.CopyFile tmpdir & "\vim-vmls-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-dotnet-msi.log", logdir
+   fso.CopyFile tmpdir & "\vim-all-msi.log", logdir
+   fso.CopyFile tmpdir & "\vmlic.log", logdir
+   fso.CopyFile tmpdir & "\VCDatabaseUpgrade.log", logdir
+   fso.CopyFile tmpdir & "\redist.log", logdir
+   fso.CopyFile tmpdir & "\vmmsde.log", logdir
+   lmlog = wshell.RegRead("HKLM\SOFTWARE\FLEXlm License Manager\VMware License Server\LMGRD_LOG_FILE")
+   If Len(lmlog) <> 0 Then
+      fso.CopyFile lmlog, logdir
+   End If
+   On Error Goto 0
+End Sub
+
+'
+' This is a temporary fix for PR 172514. The correct fix is to leverage/extend
+' the extensibility api
+'
+Sub GatherAlpineSupportBundle
+   Dim alpineInstallPath, alpineDir
+   alpineDir = workdir & "\AlpineSupport"
+   on error resume next
+   alpineInstallPath = wshell.RegRead("HKLM\SOFTWARE\" & companyName & _
+      "\VMware Update Manager\InstallPath")
+   on error goto 0
+   If Len(alpineInstallPath) <> 0 Then
+      Log "Generating Alpine support bundle..", True
+      if not fso.FolderExists(alpinedir) Then
+         fso.CreateFolder(alpinedir)
+      end if
+      RunCmd "cscript //NoLogo " & Quote(alpineInstallPath & _
+         "\vum-support.wsf") & " /o:" & Quote(alpinedir & "\alpine-support.zip"), _
+         alpinedir & "\alpine-support-output.txt"
+   Else
+      Log "Alpine was not installed. Not generating alpine support bundle.", False
+   End if
+End Sub
+
+Sub GatherEventLogs
+   Log "Gathering event logs..", True
+   If Not fso.FolderExists(logdir) Then
+      fso.CreateFolder(logdir)
+   End If
+   CopyEventLog "Application", logdir
+   CopyEventLog "System", logdir
+   CopyEventLog "Security", logdir
+End Sub
+
+Sub CopyEventLog(logname, directory)
+   Dim query1, query2, logfileset, logfileobj
+   query1 = "winmgmts:{impersonationLevel=impersonate," &_
+            "(Backup,Security)}!\\.\root\cimv2"
+   query2 = "select * from Win32_NTEventLogFile where " &_
+            "LogfileName='" & logname & "'"
+   Set logfileset = GetObject(query1).ExecQuery(query2)
+   For Each logfileobj in logfileset
+      logfileobj.BackupEventLog(directory & "\" & logname & "-log.evt")
+   Next
+   RunCmd "cscript //Nologo %SystemRoot%\system32\eventquery.vbs /l " & logname & _
+	  " /v /r 500 /fo csv", logdir & "\" & logname & "-log.csv"
+End Sub
+
+Sub DumpKey(DefKey, Path, filename)
+   Dim f1, Keys
+   reg.EnumKey DefKey, Path, Keys
+   if not IsNull(Keys) Then
+      Set f1 = fso.CreateTextFile(filename, True)
+      ' the stdregprov is flaky on some machines so ignore errors
+      on error resume next
+      EnumerateKey DefKey, Path, f1
+      if Err.Number <> 0 Then
+         Log "*** Error while enumerating key " & path & "/" & names(i) &_
+             ": (" & Err.Number & ") generated by " & Err.Source & _
+             ControlChars.CrLf & Err.Description, False
+      End If
+      on error goto 0
+      f1.Close
+   end if
+End Sub
+
+' Convert and quote a string
+Function Quote(strin)
+    Dim siz, i, s
+    siz = Len(strin)
+    For i=1 to siz
+        s = s & Chr(Asc(Mid(strin, i, 1)))
+    Next
+    Quote = Chr(34) & s & Chr(34)
+End Function
+
+' Run a command and save the output to a file
+Function RunCmd(cmd, outfile)
+   Dim f1, run, output, FileName
+   run = Null
+   Log "~~~ Command: " & cmd & " > " & outfile, False
+   on error resume next
+   set run = wshell.Exec(cmd)
+    if IsNull(run) then
+       Log "*** Failed to execute: " & cmd & ": " & Err.Description, False
+       on error goto 0
+       RunCmd = False
+       Exit Function
+   end if
+   on error goto 0
+
+   output = ""
+   do while run.status = 0
+      output = output & run.stdout.readall
+   loop
+
+   if run.ExitCode = 0 then
+      if fso.FileExists(outfile) then
+         Set f1 = fso.OpenTextFile(outfile, ForAppending)
+      else
+         Set f1 = fso.CreateTextFile(outfile, True)
+      end if
+      output = output & run.stdout.readall
+      f1.Write output
+      f1.Close
+      RunCmd = True
+   else
+      Log "*** Command returned with errors:", False
+      output = output & run.stdout.readall
+      Log "***   " & output, False
+      output = run.stderr.readall
+      Log "***   " & output, False
+      RunCmd = False
+   End If
+End Function
+
+' Recursively enumerate registry and write it to a file. 
+Sub EnumerateKey(DefKey, Path, OutFile)
+   dim Keys, Names, types, i, j, value
+   OutFile.WriteLine("[" & Path & "]")
+   reg.EnumValues DefKey, Path, Names, Types
+   if not IsNull(Names) and not IsNull(Types) Then
+      for i = lbound(types) to ubound(types)
+         select case types(i)
+            case 1
+               reg.GetStringValue defkey, path, names(i), value
+               If not isnull(names(i)) or not isnull(value) then
+                  OutFile.WriteLine  names(i) & "=" & Quote(value)
+               end if
+            case 2
+               reg.GetExpandedStringValue defkey, path, names(i), value
+               if not isnull(names(i)) or not isnull(value) then
+                  OutFile.WriteLine Quote(names(i)) & "=expand:" & Quote(value)
+               end if
+            case 3
+               reg.GetBinaryValue defkey, path, names(i), value
+               for j = lbound(value) to ubound(value)
+                  value(j) = hex(cint(value(j)))
+               next
+               if not isnull(names(i)) or not isnull(value) then
+                  OutFile.WriteLine Quote(names(i)) &"=hex:"& _
+                                          join(value, ",")
+               end if
+            case 4
+               reg.GetDWordValue defkey, path, names(i), value
+               if not isnull(names(i)) or value then
+                  OutFile.WriteLine Quote(names(i)) & "=dword:" & _
+                                          hex(value)
+               end if
+         end select
+      next
+   end if
+   OutFile.WriteLine 
+   reg.EnumKey HKLM, Path, Keys
+   Dim SubKey, NewPath
+   If not IsNull(Keys) Then
+      For Each SubKey In Keys
+         NewPath = Path & "\" & SubKey
+         EnumerateKey DefKey, NewPath,OutFile
+      Next
+   End if
+End Sub
+
+
+Sub GatherConfig
+   Dim AppData, ProgFiles, AgentBundleDir
+   Log "Gathering " & prodName & " configuration details..", True
+   If Not fso.FolderExists(configdir) Then
+      fso.CreateFolder(configdir)
+   End If
+   on error resume next
+   fso.CopyFile CommonAppData & "\" & prodName & "\vpxd.cfg", configdir
+   fso.CopyFile CommonAppData & "\" & prodName & "\proxy.xml", configdir
+
+   AgentBundleDir = configdir & "\vpxa-bundle-config\"
+   If Not fso.FolderExists(AgentBundleDir) Then
+      fso.CreateFolder(AgentBundleDir)
+   End If
+   fso.CopyFile installpath & "\upgrade\bundleversion.xml", AgentBundleDir
+   fso.CopyFile installpath & "\upgrade\*.cfg", AgentBundleDir
+   on error goto 0
+   
+   DumpKey HKLM, "SOFTWARE\" & companyName, configdir & "\reg-vmware.txt"
+   DumpKey HKLM, "SOFTWARE\FLEXlm License Manager", configdir & "\reg-flexlm.txt"
+   DumpKey HKLM, "SOFTWARE\ODBC\ODBC.INI", configdir & "\reg-odbc.txt"
+
+   ' file and directory layouts
+   RunCmd "%comspec% /c tree /F /A " & Quote(CommonAppData), _
+	  configdir & "\tree-appdata-vmware.txt"
+   RunCmd "%comspec% /c dir /S " & Quote(CommonAppData), _
+	  configdir & "\dir-appdata-vmware.txt"
+
+   ProgFiles = appshell.Namespace(PROGRAM_FILES).Self.Path
+   RunCmd "%comspec% /c tree /F /A " & Quote(ProgFiles & "\VMware"), _
+	  configdir & "\tree-programfiles-vmware.txt"
+   RunCmd "%comspec% /c dir /S " & Quote(ProgFiles & "\VMware"), _
+	  configdir & "\dir-programfiles-vmware.txt"
+
+   RunCmd installpath & "\vpxd.exe -v", configdir & "\vpxd-ver.txt"
+
+   GatherServiceDetails "vpxd", configdir
+   GatherServiceDetails "webAccess", configdir
+   GatherServiceDetails "VMware License Server", configdir
+
+   ' Temporary fix for PR 172514.
+   GatherServiceDetails "collector", configdir
+   GatherServiceDetails "vmware-converter", configdir
+   GatherServiceDetails "vmware-ufad-vci", configdir
+
+   GatherLicenseServerConfig(configdir)
+
+   GatherSystemConfig(configdir)
+End Sub
+
+Sub GatherLicenseServerConfig(dir)
+   Dim LicServerBase, LicenseFile, LmstatCmd
+   on error resume next
+   LicServerBase = wshell.RegRead("HKLM\SOFTWARE\" & companyName &_
+	           "\VMware License Server\InstallPath")
+   LicenseFile = wshell.RegRead("HKLM\SOFTWARE\FLEXlm License Manager\" &_
+		 "VMware License Server\License")
+   on error goto 0
+   if Len(LicServerBase) = 0 Then
+      Log "*** License server not installed..", False
+      Exit Sub
+   End If
+   Log "    Gathering license server information..", True
+   LmstatCmd = Quote(LicServerBase & "\lmstat.exe")
+   RunCmd LmstatCmd & " -v", dir & "\lmstat-v.txt"
+   RunCmd LmstatCmd & " -c " & Quote(LicenseFile) & " -i", dir & "\lmstat-i.txt"
+   RunCmd LmstatCmd & " -c " & Quote(LicenseFile) & " -a", dir & "\lmstat-a.txt"
+   RunCmd Quote(LicServerBase & "\lmdiag.exe") & " -c " & Quote(LicenseFile) &_
+	  " -n", dir & "\lmdiag-n.txt"
+End Sub
+
+Sub GatherSystemConfig(dir)
+   Dim System32Path, FirewallConfigFile
+   Log "Gathering system information..", True
+
+   RunCmd "%comspec% /c ver",       dir & "\ver.txt"
+   RunCmd "%comspec% /c set", dir & "\set.txt"
+   RunCmd "ipconfig /all", dir & "\ipconfig-all.txt"
+   RunCmd "netstat -an",   dir & "\netstat-an.txt"
+   RunCmd "netstat -aens", dir & "\netstat-aens.txt"
+   RunCmd "route print",   dir & "\route-print.txt"
+   RunCmd "arp -a",        dir & "\arp-a.txt"
+   RunCmd "net start",     dir & "\net-start.txt"
+   RunCmd "systeminfo",    dir & "\systeminfo.txt"
+   RunCmd "tasklist /V",   dir & "\tasklist-v.txt"
+   RunCmd "tasklist /SVC", dir & "\tasklist-svc.txt"
+   RunCmd "netsh diag show test /v", dir & "\netsh-diag-show-test-v.txt"
+
+   FirewallConfigFile = dir & "\firewall.txt"
+   RunCmd "netsh firewall show state", FirewallConfigFile
+   RunCmd "netsh firewall show service", FirewallConfigFile
+   RunCmd "netsh firewall show config", FirewallConfigFile
+   RunCmd "netsh firewall show currentprofile", FirewallConfigFile
+   RunCmd "netsh firewall show opmode", FirewallConfigFile
+   RunCmd "netsh firewall show allowedprogram", FirewallConfigFile
+   RunCmd "netsh firewall show portopening", FirewallConfigFile
+
+   On Error Resume Next
+   System32Path = appshell.Namespace(SYSTEM32).Self.Path
+   fso.CopyFile System32Path & "\drivers\etc\hosts", dir & "\etc-hosts.txt"
+   fso.CopyFile System32Path & "\drivers\etc\lmhosts", dir & "\etc-lmhosts.txt"
+   On Error Goto 0
+
+   ' Gathering this data takes hella long. Do it only if desperately needed
+   if ExtendedData = True then
+      RunCmd "netstat -a",    dir & "\netstat-a.txt"
+      RunCmd "netstat -anvob", dir & "\netstat-anvob.txt"
+      GatherMSInfo(dir)
+   end if
+
+   GatherServiceDetails "w3svc", dir
+   GatherIISConfig(dir)
+End Sub
+
+Sub GatherIISConfig(dir)
+   Dim iisObj, Site, binding, f1
+
+   iisObj = Null
+   on error resume next
+   Set iisObj = GetObject("winmgmts://./root/MicrosoftIISv2")
+   if IsNull(iisObj) Then
+      Log "*** IIS WMI provider not found. Not collecting IIS port details..", False
+      Exit Sub
+   End If
+   Log "    Gathering IIS port details..", True
+   Set f1 = fso.CreateTextFile(dir & "\iis-bindings.txt", True)
+   for each Site in iisObj.ExecQuery("select * from IisWebServerSetting")
+      f1.WriteLine "Site: " & Site.Name & " (" & Site.ServerComment & ")"
+      f1.WriteLine "Server bindings:"
+      for each binding in site.Properties_("ServerBindings").Value
+         f1.WriteLine binding.IP & ":" & binding.Port & ":" & binding.hostName
+      next
+      f1.WriteLine "Secure bindings:"
+      for each binding in site.Properties_("SecureBindings").Value
+         f1.WriteLine binding.IP & ":" & binding.Port
+      next
+      f1.WriteLine
+   next
+   f1.close
+   if Err.Number <> 0 Then
+	Log "*** Error collecting IIS port details: " & Err.Description, False
+   End If
+   on error goto 0
+end sub
+
+Sub GatherServiceDetails(ServiceName, dir)
+   Dim FileName
+   FileName = dir & "\service-details-" & ServiceName & ".txt"
+   RunCmd "sc qc " & Quote(ServiceName), FileName
+   RunCmd "sc queryex " & Quote(ServiceName), FileName
+   RunCmd "sc qfailure " & Quote(ServiceName), FileName
+End Sub
+
+' Save the MSinfo report
+Sub GatherMSInfo(dir)
+   Dim msinfo
+   Log "    Gathering MSinfo reports..", True
+   msinfo = wshell.RegRead("HKLM\SOFTWARE\Microsoft\Shared Tools\MSInfo\Path")
+   Log "~~~ Saving to " & Quote(dir & "\MSinfo.txt"), False
+   on error resume next
+   wshell.Run "%comspec% /c start /wait ""msinfo running"" " &_
+	      Quote(msinfo) & " /report " & Quote(dir & "\MSinfo.txt") &_
+	      " /categories Resources+Components+SWEnv+InternetExplorer", 0, True
+   on error goto 0
+End Sub
+
+Sub GatherCoreDumps
+   Log "Gathering any " & prodName & " crash dumps..", True
+   
+   If Len(VpxdSADumpSrc) <> 0 Then
+      StageFiles VpxdSADumpSrc, "^vpxd-.*\.dmp", coredumpdir
+   End If
+
+   StageFiles VpxdDumpSrc, "^vpxd-.*\.dmp", coredumpdir
+End Sub
+
+Sub GatherDrmDumps
+   Dim folderobj, sf, folderPath
+
+   If Not fso.FolderExists(drmdumpdir) Then
+      fso.CreateFolder(drmdumpdir)
+   End If
+
+   ' gather vpxd running as service drm dumps
+   If fso.FolderExists(VpxdDrmDumpSrc) Then
+      Log "Gathering " & prodName & " DRM dumps..", True
+      Set folderobj = fso.GetFolder(VpxdDrmDumpSrc)
+      For Each sf in folderobj.SubFolders
+         folderPath = drmdumpdir & "\" & sf.name & "\"
+         fso.CreateFolder folderPath
+         StageFiles VpxdDrmDumpSrc & "\" & sf.name, "^.*\.dump$", folderPath
+      Next
+   End If
+End Sub
+
+'
+' Copies 100 latest files matching the name pattern to the destination dir
+'
+' name: must be a regular expression, not a filename pattern
+'
+' Lots of gyrations in vbscript to do this simple thing!
+' We first extract all the files matching the name using fso & regexp objects.
+' Then we create a disconnected ado recordset, sort it on mtime, loop through 
+' it copying the latest n files using fso
+'
+Sub StageFiles(srcdir, name, destdir)
+   dim query1, query2, files, filerecs, file, regexp, srcDirObj, count
+   If Not fso.FolderExists(srcdir) then
+      Log "*** Directory " & srcdir & " does not exist. Skipping..", True
+      Exit Sub
+   End If
+   Set srcDirObj = fso.GetFolder(srcdir)
+   Set files = srcDirObj.Files
+
+   if files.Count = 0 then
+      Log "*** Nothing found in " & srcdir &". Skipping..", True
+      Exit Sub
+   end if
+
+   Set filerecs = CreateObject("ador.recordset")
+   filerecs.fields.append "path", 200, 1024 ' string field of 1024 max chars
+   filerecs.fields.append "mtime", 64	    ' filetime field
+   filerecs.open
+
+   set regexp = new RegExp
+   regexp.pattern = name
+   regexp.ignorecase = true
+   regexp.global = false
+   for each file in files
+      if regexp.test(file.name) then
+         filerecs.addnew
+         filerecs("path") = file.Path
+         filerecs("mtime") = file.DateLastModified
+         filerecs.update
+      end if
+   next
+
+   ' If no files match, skip
+
+   if filerecs.eof and filerecs.bof then
+      Exit Sub
+   end if
+
+   destdir = fso.BuildPath(destdir, "\")
+   if Not fso.FolderExists(destdir) then
+      fso.CreateFolder(destdir)
+   end if
+
+   filerecs.sort = "mtime"
+
+   filerecs.movelast
+   count = 0
+   on error resume next
+   do until filerecs.BOF or count >= PerFolderFileCount 
+      fso.CopyFile filerecs.fields.item("path"), destdir
+      count = count + 1
+      filerecs.moveprevious
+   loop
+   on error goto 0
+End Sub
+     
+' Appends all files under the relative path to the zipFile specified
+' The files retain their relative locations in the zip file
+'
+Function Zip(location, relpath, zipFile)
+   Dim file, sf, folderobj, fileList, zipExec
+   Set folderobj = fso.GetFolder(location & "\" & relpath)
+   Zip = 0
+   For Each sf in folderobj.SubFolders
+      Zip = Zip + Zip(location, relpath & "\" & sf.name, zipFile)
+   Next
+   fileList = ""
+   For Each file in folderobj.Files
+      fileList = fileList & Quote(relpath & "\" & file.name) & " "
+   Next
+   ' add all files in dir to zipfile
+   Set zipExec = wshell.Exec(zipCmd & " -a " & zipFile & " " & fileList)
+   do while zipExec.Status = 0
+      wscript.stdout.write "."
+      wscript.sleep 2000 ' sleep for 2 seconds before checking again
+   loop
+   wscript.stdout.write "."
+   if zipExec.ExitCode <> 0 then
+      do until zipExec.stdout.AtEndOfStream
+         wscript.stderr.WriteLine "minizip: " & zipExec.stdout.ReadLine
+      loop
+      Zip = 1
+   end if
+End Function
+
+Function ZipIt(tdir, folder)
+   Dim filelist, zipFile, oldcwd
+   RunCmd "%comspec% /c tree /F /A " & Quote(workdir), workdir & "\tree-vc-support.txt"
+   Log "Creating zip archive..", True
+   LogFile.Close
+   zipFile = folder & ".zip"
+   oldcwd = wshell.CurrentDirectory
+   wshell.CurrentDirectory = tdir & "\"
+   on error resume next
+   wshell.Run Quote(zipCmd) & " -r -m " & Quote(zipFile) & " " & Quote(folder), 0, True
+   if err.Number <> 0 Then
+      wscript.stdout.writeline "Error zipping support bundle: " _
+         & Err.Description
+   End If
+   fso.DeleteFolder(tdir & "\" & folder)
+   on error goto 0
+   wshell.CurrentDirectory = oldcwd & "\"
+   ZipIt = zipFile
+End Function
+
+Function GetVpxdServiceAccount
+   Dim query1, query2, service, services
+   query1 = "winmgmts:{impersonationLevel=impersonate," &_
+            "(Backup,Security)}!\\.\root\cimv2"
+   query2 = "select * from Win32_Service where Name = 'vpxd'"
+   Set services = GetObject(query1).ExecQuery(query2)
+   GetVpxdServiceAccount=""
+   for each service in services
+      GetVpxdServiceAccount=service.StartName
+   next
+End Function
+
+' If invoked by a user, we need to gather vpxd data from both the
+' user's appdata locations and appdata locations for when vpxd runs as a service
+Sub SetVpxdSrcDestValues(InvokedByVpxd)
+   Dim serviceAccount, sysdrive, backslash, atsign, UserAppData
+
+   UserAppData=appshell.Namespace(APPDATA).Self.Path & "\VMware\"
+   if Len(VpxdLogSrc) = 0 then
+      VpxdLogSrc=CommonAppData & "\" & prodName & "\Logs\"
+   end if
+   VpxdDumpSrc=VpxdLogSrc
+   if Len(VpxdDrmDumpSrc) = 0 then
+      VpxdDrmDumpSrc = VpxdLogSrc & "drmdump\"
+   end if
+
+   VpxdSALogSrc = VpxdLogSrc
+   VpxdSADumpSrc = VpxdDumpSrc
+   VpxdSADrmDumpSrc = VpxdDrmDumpSrc
+
+   VpxdSALogSrc = ""
+   VpxdSADumpSrc = ""
+   VpxdSADrmDumpSrc = ""
+End Sub
+
+</script>
+</job>

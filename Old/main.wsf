@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package>
+  <comment>This is my first run with .wsf.</comment>
+  <job id="default">
+    <script language="VBScript">
+      <![CDATA[wscript.arguments.usage]]>
+    </script>
+  </job>
+  <job id="userLastLogon">
+    <runtime>
+      <description>LastLogonTimeStamp.vbs
+VBScript program to determine when each user in the domain last logged on. Domain must be at Windows Server 2003 Functional Level.
+----------------------------------------------------------------------
+Copyright (c) 2007 Richard L. Mueller
+Hilltop Lab web site - http://www.rlmueller.net
+Version 1.0 - March 24, 2007
+Version 1.1 - July 6, 2007 - Modify how IADsLargeInteger interface is invoked.
+The lastLogonTimeStamp attribute is Integer8, a 64-bit number representing the date as the number of 100 nanosecond intervals since 12:00 am January 1, 1601. This value is converted to a date. The last logon date is in UTC (Coordinated Univeral Time). It must be adjusted by the Time Zone bias in the machine registry to convert to local time.
+
+You have a royalty-free right to use, modify, reproduce, and distribute this script file in any way you find useful, provided that you agree that the copyright owner above has no warranty, obligations, or liability for such use.
+</description>
+      <example></example>
+    </runtime>
+    <script language="VBScript">
+      <![CDATA[Option Explicit
+Dim objRootDSE, adoConnection, adoCommand, strQuery
+Dim adoRecordset, strDNSDomain, objShell, lngBiasKey
+Dim lngBias, k, strDN, dtmDate, objDate, objCreateDate, dtmCreateDate
+Dim strBase, strFilter, strAttributes, lngHigh, lngLow, PropFlag
+' Obtain local Time Zone bias from machine registry.
+Set objShell = CreateObject("Wscript.Shell")
+lngBiasKey = objShell.RegRead("HKLM\System\CurrentControlSet\Control\" _
+    & "TimeZoneInformation\ActiveTimeBias")
+If (UCase(TypeName(lngBiasKey)) = "LONG") Then
+    lngBias = lngBiasKey
+ElseIf (UCase(TypeName(lngBiasKey)) = "VARIANT()") Then
+    lngBias = 0
+    For k = 0 To UBound(lngBiasKey)
+        lngBias = lngBias + (lngBiasKey(k) * 256^k)
+    Next
+End If
+Set objShell = Nothing
+
+' Determine DNS domain from RootDSE object.
+Set objRootDSE = GetObject("LDAP://RootDSE")
+strDNSDomain = objRootDSE.Get("defaultNamingContext")
+Set objRootDSE = Nothing
+
+' Use ADO to search Active Directory.
+Set adoCommand = CreateObject("ADODB.Command")
+Set adoConnection = CreateObject("ADODB.Connection")
+adoConnection.Provider = "ADsDSOObject"
+adoConnection.Open "Active Directory Provider"
+adoCommand.ActiveConnection = adoConnection
+
+' Search entire domain.
+strBase = "<LDAP://" & strDNSDomain & ">"
+
+' Filter on all user objects.
+strFilter = "(&(objectCategory=person)(objectClass=user))"
+
+' Comma delimited list of attribute values to retrieve.
+strAttributes = "Name, distinguishedname, cn, lastLogonTimeStamp, whenCreated, userAccountControl"
+
+' Construct the LDAP syntax query.
+strQuery = strBase & ";" & strFilter & ";" & strAttributes & ";subtree"
+
+' Run the query.
+adoCommand.CommandText = strQuery
+adoCommand.Properties("Page Size") = 100
+adoCommand.Properties("Timeout") = 60
+adoCommand.Properties("Cache Results") = False
+Set adoRecordset = adoCommand.Execute
+
+' Enumerate resulting recordset.
+Do Until adoRecordset.EOF
+   ' Retrieve attribute values for the user.
+    strDN = adoRecordset.Fields("Name").Value
+    ' Convert Integer8 value to date/time in current time zone.
+    On Error Resume Next
+    Set objDate = adoRecordset.Fields("lastLogonTimeStamp").Value
+    If (Err.Number <> 0) Then
+        On Error GoTo 0
+        dtmDate = #1/1/1601#
+    Else
+        On Error GoTo 0
+        lngHigh = objDate.HighPart
+        lngLow = objDate.LowPart
+        If (lngLow < 0) Then
+            lngHigh = lngHigh + 1
+        End If
+        If (lngHigh = 0) And (lngLow = 0 ) Then
+            dtmDate = #1/1/1601#
+        Else
+            dtmDate = #1/1/1601# + (((lngHigh * (2 ^ 32)) _
+                + lngLow)/600000000 - lngBias)/1440
+        End If
+    End If
+    On Error Resume Next
+    dtmCreateDate = adoRecordset.Fields("whenCreated").Value
+    
+    If CLng(adoRecordset.Fields("userAccountControl").Value) And 2 Then PropFlag = PropFlag & " Account is disabled"
+    If CLng(adoRecordset.Fields("userAccountControl").Value) And 16 Then PropFlag = PropFlag & " Account is locked out"
+    If PropFlag = "" Then PropFlag = "Account is Active"
+    
+    
+    ' Display values for the user.
+    If (dtmDate = #1/1/1601#) Then
+        Wscript.Echo strDN & ";" & adoRecordset.Fields("distinguishedName").Value & ";" & adoRecordset.Fields("cn").Value & ";Never;" & dtmCreateDate & ";" & PropFlag
+    Else
+        Wscript.Echo strDN & ";" & adoRecordset.Fields("distinguishedName").Value& ";" & adoRecordset.Fields("cn").Value & ";" & dtmDate & ";" & dtmCreateDate & ";" & PropFlag
+    End If
+    propflag = ""
+    adoRecordset.MoveNext
+Loop
+
+' Clean up.
+adoRecordset.Close
+adoConnection.Close
+Set adoConnection = Nothing
+Set adoCommand = Nothing
+Set adoRecordset = Nothing
+Set objDate = Nothing
+]]>
+    </script>
+  </job>
+  <job id="checkMissingUpdates">
+    <runtime>
+      <description>This script must run on the local system.
+</description>
+      <example></example>
+    </runtime>
+    <script language="VBScript">
+      <![CDATA[On Error Resume Next
+version = "1.05"
+Const adOpenStatic = 3
+Const adLockOptimistic = 3
+Const ForWriting = 2
+Const ForReading = 1
+Const ForAppending = 8
+
+Set autoUpdateClient = CreateObject("microsoft.Update.AutoUpdate")
+Set updateSession = CreateObject("Microsoft.Update.Session")
+Set updateSearcher = updateSession.CreateupdateSearcher()
+Set searchResult = updateSearcher.Search("IsAssigned=1 and IsHidden=0 and IsInstalled=0 and Type='Software'")
+Set objConnection = CreateObject("ADODB.Connection")
+Set objRecordSet = CreateObject("ADODB.Recordset")
+Set objADInfo = CreateObject("ADSystemInfo")
+Set WshShell = WScript.CreateObject("WScript.Shell")
+Set WshSysEnv = WshShell.Environment("PROCESS")
+Set ws = wscript.CreateObject("Scripting.FileSystemObject")
+
+'Script Configuration----------------------------------------------------
+'------------------------------------------------------------------------
+scriptroot = "\\hou20017\batch$"
+strDateStamp =Year(Now) & Right(100 + Month(Now), 2) & Right (100 + Day(Now), 2)
+logfile = scriptroot & "\log\missingupdates" & strDateStamp & ".log"
+strComputer1 = objADInfo.ComputerName
+If strComputer = "" Then strComputer = wshShell.ExpandEnvironmentStrings("%Computername%")
+If InStr(ucase(WScript.FullName),"CSCRIPT.EXE") Then blnCScript = TRUE Else blnCScript = False
+OODList = scriptroot & "\log\outofdate" & strDateStamp & ".txt"
+OODCompList = scriptroot & "\log\outofdatecomputers" & strDateStamp & ".txt"
+OODcheck = False
+ComputerOOD = False
+OODUpdates = 0
+
+
+'End Script Configuration------------------------------------------------
+'------------------------------------------------------------------------
+Set l = ws.OpenTextFile (logfile, ForAppending, True)
+Set OODfile = ws.OpenTextFile (OODList, ForAppending, True)
+Set OODcompfile = ws.OpenTextFile (OODCompList, ForAppending, True)
+If Err.Number <> 0 Then WriteLog(Err.Number & ": Description:" & Err.Description)
+Err.Clear
+autoUpdateClient.detectnow()
+
+If searchResult.Updates.count = 0 Then
+WriteLog("Up to date.")
+Else
+WriteLog("Missing " & searchResult.Updates.count & " updates.")
+End If
+
+'Set updatesToDownload = CreateObject("Microsoft.Update.UpdateColl")
+
+objConnection.Open _
+	"Provider=SQLOLEDB;Data Source=houmwinetop01;" & _
+		"Trusted_Connection=Yes;Initial Catalog=SUSDB;"
+
+
+For I = 0 to searchResult.Updates.Count-1 
+	Set update = searchResult.Updates.Item(I) 
+	'strUpdates = strUpdates & update.Title
+	'objRecordSet.Open "SELECT UpdateId,CreationDate FROM PUBLIC_VIEWS.vUpdate where updateid='" & update.identity.updateid & "'", _
+    '    objConnection, adOpenStatic, adLockOptimistic
+    strSQL = "Declare @updateid varchar(100);Set @updateid = '" & update.identity.updateid & "';" & _
+		"SELECT UpdateId,CreationDate,InstallationRebootBehavior FROM PUBLIC_VIEWS.vUpdate Where updateid = @updateid"
+			objRecordSet.Open strSQL, objConnection, adOpenStatic, adLockOptimistic
+
+	releasedate = objRecordSet.Fields("CreationDate").Value
+	rebootbehavior = objRecordSet.Fields("InstallationRebootBehavior").Value
+	On Error Goto 0
+		For counter = 0 To update.categories.count -1
+		If category = "" Then
+		category = update.categories.item(counter).name
+		Else
+		category = category & "; " & update.categories.item(counter).name
+		End If
+		checkcat = update.categories.item(counter).name
+		If checkcat = "Security Updates" Or checkcat = "Critical Updates" Then categorymatch = True
+		Next
+	If checkOOD(releasedate) And categorymatch Then 
+	OODfile.WriteLine("[" & time & "] - " & strComputer & ",script version: " & version & "," & """Missing: " & update.Title & """, Release Date:" & releasedate & ", Reboot Behavior:" & rebootbehavior)
+	OODupdates = OODupdates +1
+	End If
+	If checkOOD(releasedate) And categorymatch Then ComputerOOD = True
+	WriteLog("""Missing: " & update.Title & """, Release Date:" & releasedate & ", Reboot Behavior:" & rebootbehavior)
+	If Not update.EulaAccepted Then update.AcceptEula
+
+	objRecordset.Close
+	category = ""
+	categorymatch = False
+Next
+If ComputerOOD Then OODfile.WriteLine("[" & time & "] - " & strComputer & ",script version: " & version & "," & "This computer has " & OODupdates & " updates out of date.")
+If ComputerOOD Then OODcompfile.WriteLine(strComputer & ",""" & OODupdates & " updates out of date.""") Else OODcompfile.WriteLine(strComputer & ","" Up to date.""")
+objConnection.Close
+Set autoUpdateClient = Nothing
+Set updateSession = Nothing
+Set objConnection = Nothing
+Set objRecordSet = Nothing
+Set objADInfo = Nothing
+
+Function WriteLog(strMsg) 
+l.writeline "[" & time & "] - " & strComputer & ",script version: " & version & "," & strMsg
+' Output to screen if cscript.exe 
+If blnCScript Then WScript.Echo "[" & time & "] " & strMsg 
+End Function
+
+Function checkOOD(releasedate)
+	d = CDate(releasedate)
+	date0 = DateAdd("m",-3,Now)
+	If d < date0 Then
+	checkOOD = True
+	Else
+	checkOOD = False
+	End If
+End Function
+]]>
+    </script>
+  </job>
+</package>
